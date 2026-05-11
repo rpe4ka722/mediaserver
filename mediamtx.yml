@@ -1,0 +1,63 @@
+###############################################
+# Базовые настройки сервера
+###############################################
+
+# Уровень логирования (info, warn, error, debug)
+logLevel: info
+
+# API для управления сервером (нужно для Django)
+api: yes
+apiAddress: 0.0.0.0:9997
+
+
+# Настройки для браузеров (WebRTC)
+webrtc: yes
+webrtcAddress: :8889
+
+# Если сервер за NAT, раскомментируй и укажи внешний IP:
+# webrtcICEUDPServerAddress: 1.2.3.4:8189
+
+# Настройки RTSP (для приема потоков с камер)
+rtsp: yes
+rtspAddress: :8554
+
+# Настройки HLS (для Safari/iOS)
+hls: yes
+hlsAddress: :8888
+
+
+authInternalUsers:
+- user: any
+  pass:
+  ips: []
+  permissions:
+  - action: publish
+    path:
+  - action: read
+    path:
+  - action: playback
+    path:
+  - action: api
+
+# - user: myuser
+#   pass: mypass
+#   ips: []
+#   permissions:
+#   - action: api
+#   - action: metrics
+#   - action: pprof
+
+###############################################
+# Настройки путей (камер)
+###############################################
+
+paths:
+  # Настройка по умолчанию для всех путей
+  all:
+    # Использовать TCP для забора потока с камер (стабильнее через маршрутизаторы)
+    sourceProtocol: tcp
+
+  # ПРИМЕР ручного добавления камеры:
+  # cam1:
+  #   source: rtsp://rpe4ka722:rpekNOVOSIB2103@192.168.1.193:554/stream1 
+  #   rtspTransport: tcp

@@ -1,0 +1,303 @@
+{% extends "main/templates/layout_camera.html" %}
+{% block title %}{% endblock %}
+{% block content %}
+<div class="button-panel">
+  <div class="button-panel">
+    <!-- Кнопка-триггер модального окна -->
+    <div>
+    </div>
+    <span>
+      {% if request.user %}
+      {{request.user.username}}
+      {% else %}
+      -
+      {% endif %}
+    </span>
+  </div>
+</div>
+<!-- Содержание тела -->
+<div class="card_wrapper">
+  <!-- Карточки оповещений -->
+  {% for camera in cameras %}
+  <div id="card_{{camera.id}}"
+       class="card_child" 
+       data-bs-toggle="modal"
+       data-bs-target="#modal_edit_camera" 
+
+       data-id="{{ camera.id }}"
+       data-name="{{ camera.name|escapejs }}"
+       data-description="{{ camera.description|escapejs }}"
+       data-address="{{ camera.camera_address|escapejs }}"
+       data-login="{{ camera.camera_login|escapejs }}"
+       data-password="{{ camera.camera_password|escapejs }}"
+       data-port="{{ camera.camera_port|escapejs }}"
+       data-path="{{ camera.camera_path|escapejs }}"
+
+      onclick="EditFunc(this)">
+
+    <div class="card">
+      <div class="card-body">
+        <div class="card_logo" align="center">
+        <img src="static/main/camera_icon.png"  height="100">
+        </div>
+        <h5 class="card-title">{{camera.name}}</h5>
+        <p class="card-text">{{camera.description}}</p>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+  <!-- =============================== -->
+  <!-- Карточка создания -->
+  <div id="create_card" class="card_child" data-bs-toggle="modal" data-bs-target="#CreateCamera" onclick="CreateFunc()">
+    <div class="card">
+      <div class="create-card">
+        <div class="create-card-logo">
+          <img src="static/main/camera_icon.png"  height="100">
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- =============================== -->
+</div>
+<!-- Модальное окно создание камеры-->
+<div class="modal fade" id="CreateCamera" tabindex="-1" aria-labelledby="exampleModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <!-- заголовок -->
+      <div class="modal-header">
+        <h5 class="modal-title fs-5" id="exampleModalLabel">Добавить новую камеру</h5>
+      </div>
+      <!-- тело -->
+      <div class="modal-body">
+        <form id="create_camera_form" method="post" action="{% url 'main:create_camera'%}">
+          {% csrf_token %}
+          <!-- название -->
+          <div class="mb-3">
+            <label for="camera_name_input" class="form-label">Введите название камеры</label>
+            <input 
+                type="text" 
+                class="form-control" 
+                id="camera_name_input" 
+                maxlength="50" 
+                required 
+                name="camera_name"
+                pattern="^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                title="Разрешены только строчные латинские буквы, цифры и дефис. Дефис не может быть в начале или конце."
+            >
+          </div>
+          <!-- описание -->
+          <div class="mb-3">
+            <label for="description_input" class="form-label">Введите краткое описание камеры</label>
+            <textarea class="form-control" id="description_input" rows="2" required name="camera_description" maxlength="500"></textarea>
+          </div>
+          <!-- ip адрес камеры -->
+          <div class="mb-3">
+            <label for="camera_address_input" class="form-label">Введите ip адрес камеры</label>
+            <input 
+              type="text" 
+              class="form-control" 
+              id="camera_address_input" 
+              name="camera_address" 
+              maxlength="100" 
+              placeholder="Введите ip адрес"
+              pattern="^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$" 
+              required
+            >
+          </div>
+          <!-- логин для камеры -->
+          <div class="mb-3">
+            <label for="camera_login_input" class="form-label">Введите логин камеры</label>
+            <input 
+              type="text" 
+              class="form-control" 
+              id="camera_login_input" 
+              name="camera_login" 
+              maxlength="100" 
+              placeholder="Введите логин" 
+              required
+            >
+          </div>
+          <!-- пароль для камеры -->
+          <div class="mb-3">
+            <label for="camera_password_input" class="form-label">Введите пароль камеры</label>
+            <input 
+              type="password" 
+              class="form-control" 
+              id="camera_password_input" 
+              name="camera_password" 
+              maxlength="100" 
+              placeholder="Введите пароль" 
+              required
+            >
+            <div class="form-check mt-1">
+              <input class="form-check-input" type="checkbox" id="show_pass_check" onclick="togglePass()">
+              <label class="form-check-label" style="font-size: 0.8rem;" for="show_pass_check">Показать пароль</label>
+            </div>
+          </div>
+          <!-- порт камеры -->
+          <div class="mb-3">
+            <label for="camera_address_input" class="form-label">Введите порт камеры</label>
+            <input 
+              type="number" 
+              class="form-control" 
+              id="camera_port_input" 
+              name="camera_port" 
+              min="1" 
+              max="65535"
+              placeholder="Введите порт"
+              value="554" 
+              required
+            >
+          </div>
+          <div class="mb-3">
+            <label for="camera_path_input" class="form-label">Путь потока (RTSP Path)</label>
+            <input 
+              type="text" 
+              class="form-control" 
+              id="camera_path_input" 
+              name="camera_path" 
+              maxlength="100" 
+              placeholder="Например: stream1 или live/ch0" 
+              title="Разрешены буквы, цифры, дефисы, точки и слеши"
+              pattern="^/?[\w\d\.\-/]+$"
+              required
+            >
+          </div>          
+        </form>
+      </div>
+      <!-- подвал -->
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Закрыть</button>
+        <button type="submit" class="btn btn-outline-secondary btn-sm" form="create_camera_form">Создать</button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- =============================== -->
+<!-- Модальное окно удаления камеры-->
+<div class="modal fade" id="DeleteCamera" tabindex="-1" aria-labelledby="exampleModalLabel1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title fs-5" id="delete_camera_message">Вы действительно хотите удалить выбранную камеру?</h5>
+      </div>
+      <div class="modal-body">
+        <form id="delete_camera_form" method="post">
+          {% csrf_token %}
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Закрыть</button>
+        <button type="submit" class="btn btn-outline-secondary btn-sm" form="delete_camera_form">Удалить</button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- =============================== -->
+<!-- Модальное окно редактирование камеры-->
+<div class="modal fade" id="modal_edit_camera" tabindex="-1" aria-labelledby="exampleModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <!-- заголовок -->
+      <!-- заголовок -->
+      <div class="modal-header">
+        <h5 class="modal-title fs-5" id="exampleModalLabel">Редактировать камеру</h5>
+      </div>
+      <!-- тело -->
+      <div class="modal-body">
+        <form id="edit_camera_form" method="post">
+          {% csrf_token %}
+          <!-- название -->
+          <div class="mb-3">
+            <label for="camera_name_input" class="form-label">Введите название камеры</label>
+            <input 
+                type="text" 
+                class="form-control" 
+                id="edit_camera_name_input" 
+                maxlength="50" 
+                required 
+                name="camera_name"
+                pattern="^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                title="Разрешены только строчные латинские буквы, цифры и дефис. Дефис не может быть в начале или конце."
+            >
+          </div>
+          <!-- описание -->
+          <div class="mb-3">
+            <label for="description_input" class="form-label">Введите краткое описание камеры</label>
+            <textarea class="form-control" id="edit_description_input" rows="2" required name="camera_description" maxlength="500"></textarea>
+          </div>
+          <!-- ip адрес камеры -->
+          <div class="mb-3">
+            <label for="edit_camera_address_input" class="form-label">Введите ip адрес камеры</label>
+            <input 
+              type="text" 
+              class="form-control" 
+              id="edit_camera_address_input" 
+              name="camera_address" 
+              maxlength="100" 
+              placeholder="Введите ip адрес"
+              pattern="^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$" 
+              required
+            >
+          </div>
+          <!-- логин для камеры -->
+          <div class="mb-3">
+            <label for="edit_camera_login_input" class="form-label">Введите логин камеры</label>
+            <input 
+              type="text" 
+              class="form-control" 
+              id="edit_camera_login_input" 
+              name="camera_login" 
+              maxlength="100" 
+              placeholder="Введите логин" 
+              required
+            >
+          </div>
+          <!-- пароль для камеры -->
+          <div class="mb-3">
+            <label for="edit_camera_code_input" class="form-label">Введите пароль камеры</label>
+            <input 
+              type="password" 
+              class="form-control" 
+              id="edit_camera_code_input" 
+              name="camera_password" 
+              maxlength="100" 
+              placeholder="Введите пароль" 
+              required
+            >
+            <div class="form-check mt-1">
+              <input class="form-check-input" type="checkbox" id="edit_show_pass_check" onclick="togglePass()">
+              <label class="form-check-label" style="font-size: 0.8rem;" for="show_pass_check">Показать пароль</label>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label for="edit_camera_path_input" class="form-label">Путь потока (RTSP Path)</label>
+            <input 
+              type="text" 
+              class="form-control" 
+              id="edit_camera_path_input" 
+              name="camera_path" 
+              maxlength="100" 
+              placeholder="Например: stream1 или live/ch0" 
+              title="Разрешены буквы, цифры, дефисы, точки и слеши"
+              pattern="^/?[\w\d\.\-/]+$"
+              required
+            >
+            <div class="form-text">Остаток пути после IP и порта (например, /stream1)</div>
+          </div>
+        </form>
+      </div>
+      <!-- подвал -->
+      <div class="modal-footer">
+        <div id="trash-button">
+          <button type="submit" class="btn btn-outline-secondary btn-sm me-auto" form="delete_camera_form">
+            Удалить <i class="bi bi-trash3-fill"></i>
+          </button>
+        </div>
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Закрыть</button>
+        <button type="submit" class="btn btn-outline-secondary btn-sm" form="edit_camera_form">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

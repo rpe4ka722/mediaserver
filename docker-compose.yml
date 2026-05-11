@@ -1,0 +1,47 @@
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: mediamtx
+    # Оставляем host для работы RTSP/WebRTC напрямую
+    network_mode: "host" 
+    restart: always
+    volumes:
+      - /opt/mediaserver/mediamtx.yml:/mediamtx.yml
+
+#   django_app:
+#     build: 
+#       context: .
+#       dockerfile: Dockerfile
+#     image: django_app
+#     container_name: django_app
+#     restart: always
+#     expose:
+#       - 8000
+#     volumes:
+#       - /opt/mediaserver/config:/opt/mediaserver/config
+#       - static_volume:/opt/mediaserver/django_app/static
+#       - ./media:/opt/mediaserver/django_app/media
+#     environment:
+#       - ENV_PATH=/opt/mediaserver/config/.env
+#     # ДОБАВЛЕНО: без этого Django не увидит API на хосте
+#     extra_hosts:
+#       - "host.docker.internal:host-gateway"
+#     depends_on:
+#       - mediamtx
+#     command: gunicorn --bind 0.0.0.0:8000 --workers 3 django_app.wsgi:application
+
+#   nginx:
+#     image: nginx:latest
+#     container_name: nginx
+#     ports:
+#       - "80:80"
+#     volumes:
+#       - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+#       - static_volume:/opt/mediaserver/django_app/static
+#       - ./media:/opt/mediaserver/django_app/media
+#     depends_on:
+#       - django_app
+#     restart: always
+
+# volumes:
+#   static_volume:

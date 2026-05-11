@@ -1,0 +1,58 @@
+{% extends "main/templates/layout_main.html" %}
+{% load static %}
+{% block title %}{% endblock %}
+{% block content %}
+<div class="button-panel">
+  <div class="d-flex align-items-center">
+    <span id="server-status-lamp" class="me-2" style="width: 12px; height: 12px; border-radius: 50%; background-color: gray;"> </span>
+    <small id="server-status-text"> Проверка сервера...</small>
+  </div>
+  <span>
+    {% if request.user %}
+    {{request.user.username}}
+    {% else %}
+    -
+    {% endif %}
+  </span>
+</div>
+<!-- Содержание тела -->
+<div class="card_wrapper">
+    <!-- Карточки камер -->
+    {% for camera in cameras %}
+    <div id="card_{{camera.id}}" class="card_child" data-bs-toggle="modal" data-bs-target="#Play" onclick="PlayFunc('{{camera.id}}', '{{camera.name}}')">
+      <div class="card">
+        <div class="card-body">
+          <div class="card_logo" align="center">
+            <img src="static/main/camera_icon.png"  height="100">
+          </div>
+          <h5 class="card-title">{{camera.name}}</h5>
+          <p class="card-text">{{camera.description}}</p>
+        </div>
+        <div class="card-footer">
+            <div class="play_list_modal_footer">
+                <i class="bi bi-telephone-forward-fill"></i>
+                <h5>Смотреть трансляцию</h5>
+            </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+    <!-- =============================== -->
+</div>
+<!-- Модальное окно запуска списка-->
+<div class="modal fade" id="Play" tabindex="-1" aria-hidden="true">
+  <div ></div>
+  <div class="modal-dialog">
+      <div class="modal-content">
+          <div class="modal-header">
+              <h5 class="modal-title fs-5" id="play_message"></h5>
+          </div>
+          <div class="modal-footer">
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Закрыть</button>
+              <button type="button" id="play_button" class="btn btn-outline-secondary btn-sm" form="start_call" data-bs-dismiss="modal" disabled>Запустить</button>
+          </div>
+      </div>
+  </div>
+</div>
+<form id="start_call" method="GET"></form>
+{% endblock %}
