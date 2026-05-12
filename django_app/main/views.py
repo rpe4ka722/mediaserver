@@ -11,6 +11,7 @@ from django.db import transaction
 import os
 import platform
 import socket
+import subprocess
 
 
 @login_required(login_url='account:login')
@@ -100,37 +101,52 @@ def delete_camera(request, camera_id):
 def edit_camera(request, camera_id):
     if request.method == 'POST':
         camera = get_object_or_404(Camera, pk=camera_id)
-        old_name = camera.name 
-        new_name = request.POST.get('camera_name')
+        
+        # Сохраняем старые значения для сравнения и удаления
+        old_name = camera.name
+        old_path = camera.camera_path  # Именно по этому полю ищем в MediaMTX
+
+        # Обновляем объект данными из формы (пока без save)
+        camera.name = request.POST.get('camera_name')
+        camera.description = request.POST.get('camera_description')
+        camera.camera_address = request.POST.get('camera_address')
+        camera.camera_port = request.POST.get('camera_port') or 554
+        camera.camera_login = request.POST.get('camera_login')
+        camera.camera_password = request.POST.get('camera_password')
+        camera.camera_path = request.POST.get('camera_path')
+        
+        new_name = camera.name
+        new_path = camera.camera_path
 
         try:
             with transaction.atomic():
-                # Обновляем поля
-                camera.name = new_name
-                camera.description = request.POST.get('camera_description')
-                camera.camera_address = request.POST.get('camera_address')
-                camera.camera_port = request.POST.get('camera_port') or 554
-                camera.camera_login = request.POST.get('camera_login')
-                camera.camera_password = request.POST.get('camera_password')
-                camera.camera_path = request.POST.get('camera_path')
+                # 1. Сначала сохраняем изменения в БД
                 camera.save()
 
-                # Синхронизация
-                if old_name != new_name:
-                    # Пересоздаем путь при смене имени
-                    mediamtx_delete_path(old_name)
+                # 2. Проверяем доступность MediaMTX через наш "предохранитель"
+                # Передаем уже сохраненный ID, функция подтянет новые данные
+                status, message = check_path_or_create(camera.id)
+                if not status:
+                    raise Exception(f"MediaMTX недоступен или ошибка пути: {message}")
+
+                # 3. Синхронизация логики путей
+                # Если путь в MediaMTX (camera_path) изменился:
+                if old_path != new_path:
+                    mediamtx_delete_path(old_path)
                     success, error = mediamtx_add_path(camera)
                 else:
+                    # Если путь тот же, просто обновляем параметры внутри (source и т.д.)
                     success, error = mediamtx_edit_path(camera)
 
                 if not success:
-                    raise Exception(f"Ошибка синхронизации с MediaMTX: {error}")
+                    raise Exception(f"Ошибка API MediaMTX: {error}")
 
                 messages.success(request, f'Камера "{new_name}" обновлена.')
 
         except Exception as e:
             messages.error(request, f'Ошибка сохранения: {e}')
-            
+            logger.error(f"Error updating camera {camera_id}: {str(e)}")
+
     return redirect('main:camera')
 
 
@@ -194,51 +210,122 @@ def mediamtx_ping(request):
 @login_required(login_url='account:login')
 def ensure_camera_in_mediamtx(request, camera_id):
     """
-    Проверяет наличие пути в MediaMTX и создает его.
-    Возвращает JsonResponse для использования во View.
+    Проверяет доступность камеры и наличие пути в MediaMTX.
     """
     camera = get_object_or_404(Camera, id=camera_id)
     api_url = settings.MEDIAMTX_API_URL.rstrip('/')
+    camera_ip = camera.camera_address
+    camera_port = camera.camera_port
     path_name = camera.name
     
     result = {
         "status": "error",
-        "message": "",
-        "camera_name": path_name
+        "message": "Camera unreachable", # Сообщение по умолчанию
+        "camera_name": path_name,
+        "details": {
+            "path": False,
+            "tcp": False
+        }
     }
-    
+
+    # 1. Сетевые проверки (зажигают первые две лампочки)
+
+    result["details"]["tcp"] = check_ip(camera_ip, camera_port)
+
+    # 2. Работа с MediaMTX (только если камера ответила по TCP)
+    if result["details"]["tcp"]:
+        try:
+            # Проверка наличия пути
+            check_res = requests.get(f"{api_url}/v3/config/paths/get/{path_name}", timeout=5)
+            
+            if check_res.status_code == 200:
+                result["details"]["path"] = True
+                result["status"] = "success"
+                result["message"] = "Path is ready"
+            
+            elif check_res.status_code == 404:
+                # Попытка создания пути
+                success, error_msg = mediamtx_add_path(camera)
+                if success:
+                    result["details"]["path"] = True
+                    result["status"] = "success"
+                    result["message"] = "Path created successfully"
+                else:
+                    result["message"] = f"Path creation failed: {error_msg}"
+            else:
+                result["message"] = f"MediaMTX unexpected status: {check_res.status_code}"
+                
+        except requests.exceptions.RequestException as e:
+            result["message"] = f"MediaMTX connection error: {str(e)}"
+    else:
+        result["message"] = f"Camera {camera_ip}:{camera_port} is offline (TCP check failed)"
+
+    # Возвращаем 200 всегда, чтобы фронтенд мог отрисовать лампочки, 
+    # а статус готовности проверял через result.status
+    return JsonResponse(result)
+
+
+def check_path_or_create(camera_id):
+    """
+    Проверяет наличие пути в MediaMTX и создает его, если он отсутствует.
+    Возвращает (success: bool, message: str)
+    """
     try:
+        
+        try:
+            camera = Camera.objects.get(id=camera_id)
+        except Camera.DoesNotExist:
+            return False, f"Камера с ID {camera_id} не найдена в базе."
+
+        path_name = camera.camera_path
+        api_url = settings.MEDIAMTX_API_URL.rstrip('/')
+
         # 1. Проверка наличия
         check_res = requests.get(f"{api_url}/v3/paths/get/{path_name}", timeout=5)
-        
+
         if check_res.status_code == 200:
-            result.update({"status": "success", "message": "Already exists"})
-            return JsonResponse(result)
-        
-        # 2. Создание, если не найдено
+            return True, "Путь уже существует."
+
+        # 2. Создание, если не найдено (404)
         if check_res.status_code == 404:
+            # Ваша функция добавления (убедитесь, что она тоже не требует request)
             success, error_msg = mediamtx_add_path(camera)
-            
             if success:
-                result.update({"status": "success", "message": "Created"})
+                return True, "Путь успешно создан."
             else:
-                result.update({"message": f"Creation failed: {error_msg}"})
-        else:
-            result.update({"message": f"MediaMTX unexpected status: {check_res.status_code}"})
-            
+                return False, f"Ошибка MediaMTX при создании: {error_msg}"
+        
+        return False, f"MediaMTX вернул неожиданный статус: {check_res.status_code}"
+
     except requests.exceptions.RequestException as e:
-        result.update({"message": f"MediaMTX connection error: {str(e)}"})
+        logger.error(f"MediaMTX Connection Error: {e}")
+        return False, f"Ошибка соединения с MediaMTX: {str(e)}"
+    except Exception as e:
+        logger.exception("Unexpected error in check_path_or_create")
+        return False, f"Критическая ошибка: {str(e)}"
 
-    # Возвращаем JSON. Если статус не успех, по умолчанию вернет error.
-    return JsonResponse(result, status=200 if result["status"] == "success" else 500)
 
 
 
-def ping_camera(ip):
-    # -c 1 для Linux, -n 1 для Windows
-    param = '-n' if platform.system().lower() == 'windows' else '-c'
-    response = os.system(f"ping {param} 1 {ip} > /dev/null 2>&1")
-    return response == 0
+
+# def ping_camera(ip):
+#     # Определяем параметр в зависимости от ОС
+#     param = '-n' if platform.system().lower() == 'windows' else '-c'
+#     # Используем -W (timeout) для Linux, чтобы не ждать долго, если хост мертв
+#     timeout_param = ['-w', '1000'] if platform.system().lower() == 'windows' else ['-W', '1']
+    
+#     command = ['ping', param, '1'] + timeout_param + [ip]
+    
+#     try:
+#         # subprocess.run безопаснее и позволяет подавить вывод через devnull
+#         result = subprocess.run(
+#             command, 
+#             stdout=subprocess.DEVNULL, 
+#             stderr=subprocess.DEVNULL
+#         )
+#         return result.returncode == 0
+#     except Exception:
+#         return False
 
 
 def check_ip(ip, port=554, timeout=1):
@@ -250,40 +337,40 @@ def check_ip(ip, port=554, timeout=1):
         return False
 
 
-@login_required(login_url='account:login')
-def check_camera_network(request, camera_id):
-    # Используем булевы значения вместо строк "true"/"false" для удобства фронтенда
-    result = {
-        "status": "error",
-        "icmp_ping": False,
-        "tcp_connection": False,
-        "message": ""
-    }
 
-    try:
-        camera = get_object_or_404(Camera, id=camera_id)
-        ip = camera.camera_address
-        port = camera.camera_port
+# def check_camera_network(request, camera_id):
+#     # Используем булевы значения вместо строк "true"/"false" для удобства фронтенда
+#     result = {
+#         "status": "error",
+#         "icmp_ping": False,
+#         "tcp_connection": False,
+#         "message": ""
+#     }
 
-        # 2. Проводим проверки
-        result["icmp_ping"] = ping_camera(ip)
-        result["tcp_connection"] = check_ip(ip, port)
+#     try:
+#         camera = get_object_or_404(Camera, id=camera_id)
+#         ip = camera.camera_address
+#         port = camera.camera_port
 
-        # 3. Логика статуса: успех только если сервис (TCP) доступен
-        if result["tcp_connection"]:
-            result["status"] = "success"
-            result["message"] = "Камера доступна"
-        elif result["icmp_ping"]:
-            result["status"] = "warning"
-            result["message"] = f"Устройство {camera.name} в сети, но порт {camera.port} закрыт"
-        else:
-            result["message"] = "Устройство недоступно"
+#         # 2. Проводим проверки
+#         result["icmp_ping"] = ping_camera(ip)
+#         result["tcp_connection"] = check_ip(ip, port)
 
-    except Exception as e:
-        logger.error(f"Error checking camera {camera.name}: {e}")
-        result["message"] = f"Критическая ошибка: {str(e)}"
-        return JsonResponse(result, status=500)
+#         # 3. Логика статуса: успех только если сервис (TCP) доступен
+#         if result["tcp_connection"]:
+#             result["status"] = "success"
+#             result["message"] = "Камера доступна"
+#         elif result["icmp_ping"]:
+#             result["status"] = "warning"
+#             result["message"] = f"Устройство {camera.name} в сети, но порт {camera.port} закрыт"
+#         else:
+#             result["message"] = "Устройство недоступно"
 
-    return JsonResponse(result, status=200)
+#     except Exception as e:
+#         logger.error(f"Error checking camera {camera.name}: {e}")
+#         result["message"] = f"Критическая ошибка: {str(e)}"
+#         return JsonResponse(result, status=500)
+
+#     return JsonResponse(result, status=200)
 
 

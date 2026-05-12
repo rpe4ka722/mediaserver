@@ -12,5 +12,5 @@ urlpatterns = [
     path('get-stream/<int:camera_id>', views.get_camera_stream_url, name='get-stream'),
     path('api/ping-server/', views.mediamtx_ping, name='ping_server'),
     path('api/ensure_camera/<int:camera_id>', views.ensure_camera_in_mediamtx, name='ensure_camera'),
-    path('api/check_camera_network/<int:camera_id>', views.check_camera_network, name='check_camera_network'),
+    # path('api/check_camera_network/<int:camera_id>', views.check_camera_network, name='check_camera_network'),
 ]

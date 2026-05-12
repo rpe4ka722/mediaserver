@@ -308,3 +308,17 @@
 #gear-icon-list:hover {
   animation: rotation 3s linear infinite;
 }
+
+#server-status-lamp {
+  margin-right: 5px;
+}
+
+.status-lamp {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background-color: gray; /* Цвет по умолчанию */
+    margin-right: 8px;
+    transition: all 0.3s ease;
+}

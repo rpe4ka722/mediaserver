@@ -2,46 +2,50 @@ services:
   mediamtx:
     image: bluenviron/mediamtx:latest
     container_name: mediamtx
-    # Оставляем host для работы RTSP/WebRTC напрямую
-    network_mode: "host" 
+    environment:
+      - MTX_WEBRTCADDITIONALHOSTS=192.168.1.187
+    ports:
+      - "8554:8554"
+      - "8890:8890/udp"
+      - "8189:8189/udp"
+      - "8889:8889"
+    expose:
+      - 9997
     restart: always
     volumes:
       - /opt/mediaserver/mediamtx.yml:/mediamtx.yml
 
-#   django_app:
-#     build: 
-#       context: .
-#       dockerfile: Dockerfile
-#     image: django_app
-#     container_name: django_app
-#     restart: always
-#     expose:
-#       - 8000
-#     volumes:
-#       - /opt/mediaserver/config:/opt/mediaserver/config
-#       - static_volume:/opt/mediaserver/django_app/static
-#       - ./media:/opt/mediaserver/django_app/media
-#     environment:
-#       - ENV_PATH=/opt/mediaserver/config/.env
-#     # ДОБАВЛЕНО: без этого Django не увидит API на хосте
-#     extra_hosts:
-#       - "host.docker.internal:host-gateway"
-#     depends_on:
-#       - mediamtx
-#     command: gunicorn --bind 0.0.0.0:8000 --workers 3 django_app.wsgi:application
 
-#   nginx:
-#     image: nginx:latest
-#     container_name: nginx
-#     ports:
-#       - "80:80"
-#     volumes:
-#       - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-#       - static_volume:/opt/mediaserver/django_app/static
-#       - ./media:/opt/mediaserver/django_app/media
-#     depends_on:
-#       - django_app
-#     restart: always
+  django_app:
+    image: django_app
+    container_name: django_app
+    restart: always
+    expose:
+      - 8000
+    volumes:
+      - /opt/mediaserver/config:/opt/mediaserver/config
+      - static_volume:/opt/mediaserver/django_app/static
+      - ./media:/opt/mediaserver/django_app/media
+    environment:
+      - ENV_PATH=/opt/mediaserver/config/.env
+    cap_add:
+      - NET_RAW
+    depends_on:
+      - mediamtx
+    command: gunicorn --bind 0.0.0.0:8000 --workers 3 django_app.wsgi:application
 
-# volumes:
-#   static_volume:
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - static_volume:/opt/mediaserver/django_app/static
+      - ./media:/opt/mediaserver/django_app/media
+    depends_on:
+      - django_app
+    restart: always
+
+volumes:
+  static_volume:
