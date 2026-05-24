@@ -25,10 +25,10 @@
         <a class="nav-link" aria-current="page" href="{% url 'main:index' %}">Главная</a>
         </li>
         <li class="nav-item">
-        <a class="nav-link active" href="{% url 'main:camera' %}">Управление видеокамерами</a>
+        <a class="nav-link" href="{% url 'main:camera' %}">Управление видеокамерами</a>
         </li>
         <li class="nav-item">
-        <a class="nav-link" href="{% url 'main:config' %}">Информация</a>
+        <a class="nav-link active" href="{% url 'main:config' %}">Информация</a>
         </li>
         <li class="nav-item">
         <a class="nav-link" href="{% url 'main:camera_records' %}">Записи</a>
@@ -42,7 +42,7 @@
     </ul>
     {% block content %}
     {% endblock %}
-    <script src="{% static 'scripts/camera_script.js' %}?v=0.1"></script>
+    <script src="{% static 'scripts/config.js' %}?v=0.1"></script>
 </body>
 {% if messages %}
   {% for message in messages %}

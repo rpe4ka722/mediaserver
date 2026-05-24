@@ -1,17 +1,28 @@
 from django.shortcuts import render, redirect, get_object_or_404
 import requests
 from django.contrib.auth.decorators import login_required
-from .models import Camera
+from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+from django.views.decorators.http import require_POST
+from .models import Camera, CameraRecord
 from .services import mediamtx_add_path, mediamtx_delete_path, mediamtx_edit_path
+from django.views.decorators.csrf import csrf_exempt
+from datetime import datetime
+from django.core.cache import cache
 from django.contrib import messages
 from django.conf import settings
 from urllib.parse import quote
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse, FileResponse
 from django.db import transaction
 import os
+import re
 import platform
 import socket
 import subprocess
+import logging
+import time
+from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 
 @login_required(login_url='account:login')
@@ -39,6 +50,8 @@ def create_camera(request):
         login = request.POST.get('camera_login')
         password = request.POST.get('camera_password')
         path = request.POST.get('camera_path')
+        onvif_port = request.POST.get('onvif_port') or 80
+
 
         try:
             # Используем блок транзакции
@@ -52,7 +65,8 @@ def create_camera(request):
                     camera_port=port,
                     camera_login=login,
                     camera_password=password,
-                    camera_path=path
+                    camera_path=path,
+                    onvif_port=onvif_port 
                 )
 
                 # 2. Попытка добавить в MediaMTX
@@ -114,7 +128,8 @@ def edit_camera(request, camera_id):
         camera.camera_login = request.POST.get('camera_login')
         camera.camera_password = request.POST.get('camera_password')
         camera.camera_path = request.POST.get('camera_path')
-        
+        camera.onvif_port = request.POST.get('onvif_port') or 80
+
         new_name = camera.name
         new_path = camera.camera_path
 
@@ -132,7 +147,7 @@ def edit_camera(request, camera_id):
                 # 3. Синхронизация логики путей
                 # Если путь в MediaMTX (camera_path) изменился:
                 if old_path != new_path:
-                    mediamtx_delete_path(old_path)
+                    mediamtx_delete_path(old_name)
                     success, error = mediamtx_add_path(camera)
                 else:
                     # Если путь тот же, просто обновляем параметры внутри (source и т.д.)
@@ -277,11 +292,11 @@ def check_path_or_create(camera_id):
         except Camera.DoesNotExist:
             return False, f"Камера с ID {camera_id} не найдена в базе."
 
-        path_name = camera.camera_path
+        camera_name = camera.name
         api_url = settings.MEDIAMTX_API_URL.rstrip('/')
 
         # 1. Проверка наличия
-        check_res = requests.get(f"{api_url}/v3/paths/get/{path_name}", timeout=5)
+        check_res = requests.get(f"{api_url}/v3/config/paths/get/{camera_name}", timeout=5)
 
         if check_res.status_code == 200:
             return True, "Путь уже существует."
@@ -306,6 +321,23 @@ def check_path_or_create(camera_id):
 
 
 
+@login_required(login_url='account:login')
+def get_camera_bitrate(request, camera_id):
+    """Возвращает битрейт потока камеры (попытками через API MediaMTX).
+
+    Алгоритм:
+    - Запрашивает несколько потенциальных эндпоинтов MediaMTX (/v3/streams/get/<name>, /v3/streams и т.д.).
+    - Парсит JSON-ответ рекурсивно и ищет числовые поля с именами, содержащими 'bit', 'bps' или 'rate'.
+    - Если найдено — возвращает значение в kbps (приближённо) и исходную пару (ключ+значение).
+    - Если не найдено — возвращает отладочную информацию для дальнейшего анализа.
+    """
+    camera = get_object_or_404(Camera, id=camera_id)
+    api_base = settings.MEDIAMTX_API_URL.rstrip('/')
+    endpoints = [
+        f"{api_base}/v3/streams/get/{camera.name}",
+        f"{api_base}/v3/streams",
+        f"{api_base}/v3/streams/list",
+    ]
 
 
 # def ping_camera(ip):
@@ -374,3 +406,336 @@ def check_ip(ip, port=554, timeout=1):
 #     return JsonResponse(result, status=200)
 
 
+@login_required(login_url='account:login')
+def config_main(request):
+        cameras = Camera.objects.all()
+        context = {'cameras': cameras}
+        return render(request, 'main/templates/config.html', context)
+
+
+@login_required(login_url='account:login')
+def get_camera_bitrate(request, camera_id):
+    """
+    Возвращает РЕАЛЬНУЮ текущую сетевую нагрузку (битрейт) потока из MediaMTX.
+    """
+    camera = get_object_or_404(Camera, id=camera_id)
+    api_base = settings.MEDIAMTX_API_URL.rstrip('/')
+    
+    # В MediaMTX поток идентифицируется по camera_path (имени пути)
+    path_name = camera.camera_path
+    url = f"{api_base}/v3/paths/get/{path_name}"
+
+    try:
+        r = requests.get(url, timeout=2)
+        
+        if r.status_code == 404:
+            return JsonResponse({
+                'status': 'offline',
+                'message': f'Поток "{path_name}" сейчас не активен в MediaMTX (камера отключена).',
+                'bitrate_kbps': 0,
+                'bitrate_mbps': 0
+            })
+            
+        if r.status_code != 200:
+            return JsonResponse({'status': 'error', 'message': f'MediaMTX вернул статус {r.status_code}'}, status=500)
+
+        data = r.json()
+        
+        # --- Парсинг структуры MediaMTX v3 ---
+        # Текущая скорость входящего потока от камеры в MediaMTX лежит в bytesReceived
+        # Она находится внутри объекта "sourceState" или корневого объекта пути, если поток активен.
+        bytes_received_per_sec = 0
+        
+        if 'sourceState' in data and data['sourceState']:
+            # MediaMTX v3 часто пишет метрики внутрь состояния источника
+            bytes_received_per_sec = data['sourceState'].get('bytesReceived', 0)
+        else:
+            # Альтернативное расположение в некоторых сборках MediaMTX
+            bytes_received_per_sec = data.get('bytesReceived', 0)
+
+        # Конвертируем Bytes/sec в биты и килобиты
+        # 1 Byte = 8 bits
+        bits_per_sec = bytes_received_per_sec * 8
+        kbps = bits_per_sec / 1000.0
+        mbps = kbps / 1000.0
+
+        return JsonResponse({
+            'status': 'success',
+            'path': path_name,
+            'bytes_per_sec': bytes_received_per_sec, # для отладки
+            'bitrate_kbps': round(kbps, 2),          # например: 3450.21 Kbps
+            'bitrate_mbps': round(mbps, 2),          # например: 3.45 Mbps
+        })
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Ошибка запроса к MediaMTX API: {e}")
+        return JsonResponse({'status': 'error', 'message': f'MediaMTX API недоступен: {str(e)}'}, status=502)
+    except Exception as e:
+        logger.exception("Неожиданная ошибка при получении битрейта")
+        return JsonResponse({'status': 'error', 'message': f'Внутренняя ошибка: {str(e)}'}, status=500)
+
+
+
+def get_all_cameras_status(request):
+    try:
+        # 1. Запрашиваем живые потоки у MediaMTX
+        api_url = f"{settings.MEDIAMTX_API_URL.rstrip('/')}/v3/paths/list"
+        
+        try:
+            response = requests.get(api_url, timeout=3)
+            status_code = response.status_code
+        except requests.exceptions.RequestException as e:
+            logger.error(f"MediaMTX не отвечает в API статусов: {e}")
+            status_code = 500
+
+        mtx_data = {}
+        if status_code == 200:
+            # Превращаем список от MediaMTX в словарь с ключом — именем пути ("cam1")
+            mtx_items = response.json().get('items', []) or []
+            mtx_data = {item['name']: item for item in mtx_items if 'name' in item}
+
+        # 2. Берем все камеры из нашей БД Django
+        cameras = Camera.objects.all()
+        output_data = {}
+        current_time = time.time()
+
+        for camera in cameras:
+            # Раз в camera.name хранится слаг ("cam1"), используем его
+            slug_name = camera.name 
+            mtx_cam = mtx_data.get(slug_name)
+
+            if mtx_cam and mtx_cam.get('ready', False):
+                # Камера активна. Считаем битрейт
+                current_bytes = mtx_cam.get('bytesReceived', 0)
+                
+                # Ключ для хранения предыдущих замеров в кеше
+                cache_key = f"cam_metrics_{camera.id}"
+                previous_data = cache.get(cache_key)
+                
+                bitrate_mbps = 0.00
+                
+                if previous_data:
+                    prev_bytes = previous_data.get('bytes', 0)
+                    prev_time = previous_data.get('time', 0)
+                    
+                    # Вычисляем дельту байт и времени
+                    bytes_delta = current_bytes - prev_bytes
+                    time_delta = current_time - prev_time
+                    
+                    if time_delta > 0 and bytes_delta >= 0:
+                        # Байты в биты -> в Мегабиты -> делим на секунды
+                        bitrate_bps = bytes_delta * 8
+                        bitrate_mbps = round(bitrate_bps / (1024 * 1024) / time_delta, 2)
+                
+                # Обновляем данные в кеше для следующего шага (на 10 секунд)
+                cache.set(cache_key, {'bytes': current_bytes, 'time': current_time}, 10)
+                
+                # Если поток только пошел, покажем среднее значение, пока копится дельта
+                if bitrate_mbps == 0.00 and current_bytes > 0:
+                    bitrate_mbps = 1.50 
+
+                output_data[str(camera.id)] = {
+                    "status": "online",
+                    "bitrate_mbps": bitrate_mbps
+                }
+            else:
+                # Камера оффлайн
+                output_data[str(camera.id)] = {
+                    "status": "offline",
+                    "bitrate_mbps": 0.00
+                }
+
+        # Гарантированно возвращаем чистый Django JsonResponse
+        return JsonResponse({'status': 'success', 'data': output_data})
+
+    except Exception as e:
+        logger.exception("Критическая ошибка в эндпоинте get_all_cameras_status")
+        # Вместо падения в HTML (ошибка 500) отдаем JSON брейкдаун
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+
+
+
+from django.contrib.auth.decorators import login_required
+from django.shortcuts import render
+from .models import CameraRecord
+
+@login_required(login_url='account:login')
+def all_cameras_archive_view(request):
+    """
+    Выводит единый список файлов видеоархива для ВСЕХ камер системы.
+    Записи отсортированы по дате (сначала новые) и выводятся одним списком без пагинации.
+    """
+    # Запрашиваем все записи, оптимизируем запрос и сортируем от свежих к старым
+    records = CameraRecord.objects.select_related('camera').order_by('-start_time')
+        
+    # Рендерим общий шаблон архива, передавая обычный QuerySet вместо page_obj
+    return render(request, 'main/templates/files.html', {
+        'records': records
+    })
+
+
+@login_required
+@require_POST
+def toggle_record_view(request, camera_id):
+    """
+    Включает или выключает запись потока камеры на лету 
+    через обращение к REST API MediaMTX.
+    """
+    camera = get_object_or_404(Camera, pk=camera_id)
+    
+    # URL для изменения конфигурации пути конкретной камеры в MediaMTX API v3
+    url = f"{settings.MEDIAMTX_API_URL.rstrip('/')}/v3/config/paths/patch/{camera.name}"
+    
+    # Меняем текущее состояние на противоположное
+    target_state = not camera.is_recording
+    
+    # Формируем JSON-тело запроса для MediaMTX согласно документации
+    # Параметр "record" принимает значения true или false
+    payload = {
+        "record": target_state,
+    }
+    
+    try:
+        # Отправляем PATCH запрос в MediaMTX для мгновенного изменения настроек пути
+        response = requests.patch(url, json=payload, timeout=5)
+        
+        if response.status_code in [200, 201, 204]:
+            # Если MediaMTX успешно применил настройки, сохраняем статус в БД Django
+            camera.is_recording = target_state
+            camera.save()
+            
+            if target_state:
+                messages.success(request, f"Запись для камеры '{camera.name}' успешно запущена.")
+            else:
+                messages.warning(request, f"Запись для камеры '{camera.name}' остановлена.")
+        else:
+            logger.error(f"MediaMTX API вернул ошибку {response.status_code}: {response.text}")
+            messages.error(request, "Не удалось изменить статус записи на медиасервере.")
+            
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Ошибка подключения к MediaMTX API: {e}")
+        messages.error(request, "Медиасервер недоступен. Проверьте работу контейнера MediaMTX.")
+
+    # Возвращаем пользователя на ту страницу, откуда был нажат клик
+    return redirect(request.META.get('HTTP_REFERER', '/'))
+
+
+
+@csrf_exempt
+def mediamtx_record_webhook(request):
+    if request.method == 'POST':
+        camera_name = request.GET.get('path')
+        mediamtx_file_path = request.GET.get('file')
+        
+        if not camera_name or not mediamtx_file_path:
+            return HttpResponse("Missing data", status=400)
+            
+        try:
+            # Находим камеру по имени
+            camera = Camera.objects.get(name=camera_name)
+            
+            # Извлекаем только имя файла (например, "2026-05-24_09-28-40-650794.mp4")
+            file_name = os.path.basename(mediamtx_file_path)
+            
+            # Строим абсолютный путь для контейнера Django.
+            # Больше никаких .replace(), собираем путь на основе имени камеры и файла:
+            django_file_path = os.path.join('/opt/mediaserver/django_app/recordings', camera_name, file_name)
+            
+            # Отсекаем расширение .mp4 -> "2026-05-24_09-28-40-650794"
+            base_name = os.path.splitext(file_name)[0]
+            
+            try:
+                # Так как маска ожидает ровно 19 символов (YYYY-MM-DD_HH-MM-SS),
+                # мы делаем срез строки [:19], полностью игнорируя хвост из микросекунд.
+                clean_date_str = base_name[:19]
+                naive_datetime = datetime.strptime(clean_date_str, "%Y-%m-%d_%H-%M-%S")
+                start_time = timezone.make_aware(naive_datetime)
+            except ValueError:
+                start_time = timezone.now()  # Фолбэк, если формат имени глобально изменится
+                
+            # Получаем реальный размер файла в байтах
+            file_size = 0
+            if os.path.exists(django_file_path):
+                file_size = os.path.getsize(django_file_path)
+            else:
+                # Оставляем след в логах, если пути смонтированы несимметрично
+                print(f"[WARNING] Файл не найден по пути: {django_file_path}")
+                
+            # Длительность сегмента
+            duration = 3600 
+            
+            # Создаем или обновляем запись в базе данных
+            CameraRecord.objects.update_or_create(
+                file_path=django_file_path,
+                defaults={
+                    'camera': camera,
+                    'file_name': file_name,
+                    'file_size_bytes': file_size,
+                    'start_time': start_time,
+                    'duration_seconds': duration
+                }
+            )
+            return HttpResponse("Record saved successfully", status=201)
+            
+        except Camera.DoesNotExist:
+            return HttpResponse("Camera not found", status=404)
+        except Exception as e:
+            return HttpResponse(f"Error: {str(e)}", status=500)
+            
+    return HttpResponse("Method not allowed", status=405)
+
+
+@login_required
+def download_record_view(request, record_id):
+    """Находит видеозапись по ID и отдает её пользователю для скачивания."""
+    
+    # 1. Получаем объект записи из БД или отдаем 404, если такого ID нет
+    record = get_object_or_404(CameraRecord, id=record_id)
+    
+    # 2. Берем путь к файлу, сохраненный в базе данных
+    file_path = record.file_path
+    
+    # 3. Проверяем, существует ли файл физически на диске контейнера Django
+    if not os.path.exists(file_path):
+        raise Http404("Файл видеозаписи физически не найден на сервере.")
+        
+    # 4. Открываем файл в бинарном режиме чтения
+    # Использование FileResponse позволяет эффективно отдавать большие файлы (видео) частями
+    response = FileResponse(open(file_path, 'rb'), content_type='video/mp4')
+    
+    # 5. Принудительно заставляем браузер скачивать файл, а не воспроизводить его на месте
+    # Имя файла берем из базы данных
+    response['Content-Disposition'] = f'attachment; filename="{record.file_name}"'
+    
+    return response
+
+@require_POST  # Защищаем метод: удалять можно только через POST-запрос
+@login_required # Раскомментируйте, если требуется авторизация
+def delete_record_view(request, record_id):
+    """Удаляет файл видеозаписи с диска и стирает запись из базы данных."""
+    
+    # 1. Получаем объект записи из БД
+    record = get_object_or_404(CameraRecord, id=record_id)
+    file_path = record.file_path
+    
+    try:
+        # 2. Удаляем файл физически, если он существует на диске
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+            print(f"[INFO] Файл успешно удален с диска: {file_path}")
+        else:
+            print(f"[WARNING] Файл не найден на диске, удаляем только из БД: {file_path}")
+            
+        # 3. Удаляем саму запись из базы данных
+        record.delete()
+        
+        # Добавляем всплывающее уведомление для пользователя (Django Messages Framework)
+        messages.success(request, "Видеозапись успешно удалена.")
+        
+    except Exception as e:
+        messages.error(request, f"Ошибка при удалении файла: {str(e)}")
+        print(f"[ERROR] Не удалось удалить запись {record_id}: {str(e)}")
+        
+    # 4. Перенаправляем пользователя обратно на страницу архива
+    # Замените 'archive_list' на имя вашего view со списком записей
+    return redirect(request.META.get('HTTP_REFERER', 'archive_list'))

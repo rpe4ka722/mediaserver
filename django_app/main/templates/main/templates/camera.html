@@ -32,6 +32,7 @@
        data-password="{{ camera.camera_password|escapejs }}"
        data-port="{{ camera.camera_port|escapejs }}"
        data-path="{{ camera.camera_path|escapejs }}"
+       data-onvif-port="{{ camera.onvif_port|escapejs }}"
 
       onclick="EditFunc(this)">
 
@@ -162,7 +163,21 @@
               pattern="^/?[\w\d\.\-/]+$"
               required
             >
-          </div>          
+          </div>         
+          <div class="mb-3">
+            <label for="onvif_port_input" class="form-label">Введите ONVIF порт камеры</label>
+            <input 
+              type="number" 
+              class="form-control" 
+              id="onvif_port_input" 
+              name="onvif_port" 
+              min="1" 
+              max="65535"
+              placeholder="Введите ONVIF порт"
+              value="80" 
+              required
+            >
+          </div>
         </form>
       </div>
       <!-- подвал -->
@@ -284,6 +299,20 @@
               required
             >
             <div class="form-text">Остаток пути после IP и порта (например, /stream1)</div>
+          </div>
+          <div class="mb-3">
+            <label for="edit_onvif_port_input" class="form-label">ONVIF порт камеры</label>
+            <input 
+              type="number" 
+              class="form-control" 
+              id="edit_onvif_port_input" 
+              name="edit_onvif_port" 
+              min="1" 
+              max="65535"
+              placeholder="Введите ONVIF порт"
+              value="80" 
+              required
+            >
           </div>
         </form>
       </div>

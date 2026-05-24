@@ -1,6 +1,6 @@
 services:
   mediamtx:
-    image: bluenviron/mediamtx:latest
+    image: my_mediamtx
     container_name: mediamtx
     environment:
       - MTX_WEBRTCADDITIONALHOSTS=192.168.1.187
@@ -14,11 +14,14 @@ services:
     restart: always
     volumes:
       - /opt/mediaserver/mediamtx.yml:/mediamtx.yml
+      - ${VIDEO_RECORDINGS_PATH}:/recordings
+    networks:
+      - mediaserver_net
 
 
   django_app:
     image: django_app
-    container_name: django_app
+    container_name: django-app
     restart: always
     expose:
       - 8000
@@ -26,10 +29,13 @@ services:
       - /opt/mediaserver/config:/opt/mediaserver/config
       - static_volume:/opt/mediaserver/django_app/static
       - ./media:/opt/mediaserver/django_app/media
+      - ${VIDEO_RECORDINGS_PATH}:/opt/mediaserver/django_app/recordings
     environment:
       - ENV_PATH=/opt/mediaserver/config/.env
     cap_add:
       - NET_RAW
+    networks:
+      - mediaserver_net
     depends_on:
       - mediamtx
     command: gunicorn --bind 0.0.0.0:8000 --workers 3 django_app.wsgi:application
@@ -43,9 +49,16 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf
       - static_volume:/opt/mediaserver/django_app/static
       - ./media:/opt/mediaserver/django_app/media
+      - ${VIDEO_RECORDINGS_PATH}:/opt/mediaserver/django_app/recordings
+    networks:
+      - mediaserver_net
     depends_on:
       - django_app
     restart: always
 
 volumes:
   static_volume:
+
+networks:
+  mediaserver_net:
+    driver: bridge

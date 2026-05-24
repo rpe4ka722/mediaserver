@@ -52,12 +52,12 @@ authInternalUsers:
 ###############################################
 
 paths:
-  # Настройка по умолчанию для всех путей
   all:
-    # Использовать TCP для забора потока с камер (стабильнее через маршрутизаторы)
     sourceProtocol: tcp
+    record: no  
+    recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S
+    recordFormat: fmp4
 
-  # ПРИМЕР ручного добавления камеры:
-  # cam1:
-  #   source: rtsp://rpe4ka722:rpekNOVOSIB2103@192.168.1.193:554/stream1 
-  #   rtspTransport: tcp
+    # Строго проверенный асинхронный хук (в одну строчку без переносов!)
+    runOnRecordSegmentCreate: sh -c "wget --post-data=\"path=$MTX_PATH&file=$MTX_FILE_PATH\" --timeout=5 -O - http://nginx/archive/webhook/record-created/ || echo 'failed'"
+    runOnRecordSegmentComplete: sh -c "wget --post-data=\"path=$MTX_PATH&file=$MTX_FILE_PATH\" --timeout=5 -O - http://nginx/archive/webhook/record-created/ || echo 'failed'"

@@ -19,6 +19,7 @@ function EditFunc(element) {
     const portInput = document.getElementById('edit_camera_port_input');
     const passInput = document.getElementById('edit_camera_code_input'); // Поле пароля в модалке ред.
     const pathInput = document.getElementById('edit_camera_path_input');
+    const onvifInput = document.getElementById('edit_onvif_port_input');
 
 
     // 3. Заполняем поля значениями (с проверкой на существование)
@@ -29,6 +30,7 @@ function EditFunc(element) {
     if (portInput) portInput.value = cameraData.port || '';
     if (passInput) passInput.value = cameraData.password || '';
     if (pathInput) pathInput.value = cameraData.path || '/stream1';
+    if (onvifInput) onvifInput.value = cameraData.onvif_port || 80;
 
     // 4. Если нужно менять URL формы для удаления или сохранения:
     const edit_form = document.getElementById('edit_camera_form');

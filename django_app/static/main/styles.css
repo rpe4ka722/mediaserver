@@ -322,3 +322,80 @@
     margin-right: 8px;
     transition: all 0.3s ease;
 }
+
+/* Контейнер индикатора в верхнем правом углу карточки */
+.camera-status-badge {
+    position: absolute;
+    top: 12px;
+    right: 15px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.85);
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border: 1px solid #e9ecef;
+}
+
+/* Базовый светодиод */
+.status-lamp {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    transition: all 0.4s ease;
+}
+
+/* Цвета состояний */
+.status-lamp.gray { background-color: #6c757d; }
+.status-lamp.red { background-color: #dc3545; box-shadow: 0 0 6px #dc3545; }
+.status-lamp.green { 
+    background-color: #198754; 
+    box-shadow: 0 0 6px #198754;
+    animation: status-pulse 2s infinite ease-in-out;
+}
+
+/* Пульсация для работающей камеры */
+@keyframes status-pulse {
+    0% { opacity: 0.6; transform: scale(0.9); }
+    50% { opacity: 1; transform: scale(1.1); }
+    100% { opacity: 0.6; transform: scale(0.9); }
+}
+
+.files_body {
+  margin-bottom: 70px;
+}
+
+
+/* Контейнер для индикатора */
+.rec-indicator {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    color: #dc3545;
+    font-size: 0.85rem; /* Делаем шрифт как у статуса сети */
+    background: #fff0f0; /* Легкий красный фон, чтобы смотрелось в стиле */
+    padding: 2px 8px;
+    border-radius: 12px;
+    border: 1px solid #ffdcdc;
+}
+
+/* Красный кружочек */
+.rec-dot {
+    width: 10px;
+    height: 10px;
+    background-color: #dc3545;
+    border-radius: 50%;
+    animation: blink 1.5s infinite;
+}
+
+/* Анимация мигания */
+@keyframes blink {
+    0% { opacity: 1; }
+    50% { opacity: 0.3; }
+    100% { opacity: 1; }
+}

@@ -1,0 +1,107 @@
+{% extends "main/templates/layout_files.html" %}
+{% load static %}
+
+{% block title %}Сводный видеоархив всех камер{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4 border-bottom pb-3">
+        <div>
+            <h2 class="h4 mb-0 d-flex align-items-center">
+                <i class="bi bi-collection-play-fill text-primary" style="padding-right: 10px;"></i>
+                Сводный архив всех видеокамер
+            </h2>
+        </div>
+        <div>
+            <span class="badge bg-primary px-3 py-2 fs-6">
+                Всего в базе: {{ records.count }} {{ records.count|pluralize:"запись,записи,записей" }}
+            </span>
+        </div>
+    </div>
+
+    <!-- <div class="card shadow-sm border-0">
+        <div class="card-body p-0"> -->
+            {% if records %}
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0" id="subscriberTable1">
+                        <thead class="table-light text-secondary small text-uppercase">
+                            <tr>
+                                <th scope="col" class="ps-4" style="width: 5%;">Тип</th>
+                                <th scope="col" style="width: 20%;">Видеокамера</th>
+                                <th scope="col" style="width: 35%;">Имя файла / Дата записи</th>
+                                <th scope="col" style="width: 12%;">Длительность</th>
+                                <th scope="col" style="width: 13%;">Размер файла</th>
+                                <th scope="col" class="pe-4 text-end" style="width: 15%;">Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody class="border-top-0">
+                            {% for record in records %}
+                            <tr>
+                                <td class="ps-4">
+                                    <div class="text-primary fs-4">
+                                        <i class="bi bi-file-earmark-play-fill"></i>
+                                    </div>
+                                </td>
+                                
+                                <td>
+                                    <span class="badge bg-dark text-white px-2 py-1.5 fw-semibold">
+                                        <i class="bi bi-camera-video me-1"></i> {{ record.camera.name }}
+                                    </span>
+                                </td>
+                                
+                                <td>
+                                    <div class="fw-bold text-dark mb-0">{{ record.file_name }}</div>
+                                    <small class="text-muted d-block mt-0.5">
+                                        <i class="bi bi-calendar3 me-1"></i> {{ record.start_time|date:"d.m.Y в H:i:s" }}
+                                    </small>
+                                </td>
+                                
+                                <td>
+                                    <span class="badge bg-light text-dark border fw-normal">
+                                        <i class="bi bi-clock text-muted me-1"></i> {{ record.duration_seconds }} сек
+                                    </span>
+                                </td>
+                                
+                                <td>
+                                    <span class="text-secondary fw-medium">
+                                        {{ record.file_size_mb }} МБ
+                                    </span>
+                                </td>
+                                
+                                <td class="pe-4 text-end">
+                                    <div class="d-flex justify-content-end align-items-center">
+                                        <a href="{% url 'main:download_record' record.id %}" 
+                                        class="btn btn-outline-primary btn-sm me-3" 
+                                        title="Скачать файл">
+                                            <i class="bi bi-download"></i>
+                                        </a>
+                                        
+                                        <form action="{% url 'main:delete_record' record.id %}" 
+                                            method="POST" 
+                                            class="d-inline" 
+                                            onsubmit="return confirm('Вы уверены, что хотите безвозвратно удалить файл {{ record.file_name }}?');">
+                                            {% csrf_token %}
+                                            <button type="submit" class="btn btn-outline-danger btn-sm" title="Удалить файл" style="margin-left: 10px;">
+                                                <i class="bi bi-trash3"></i>
+                                            </button>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="text-center py-5 my-3">
+                    <div class="text-muted display-2 mb-3"><i class="bi bi-folder-x"></i></div>
+                    <h5 class="text-secondary fw-bold">Видеоархив полностью пуст</h5>
+                    <p class="text-muted small max-width-250 mx-auto">
+                        Синхронизатор еще не обнаружил или не занес файлы от MediaMTX в базу данных системы.
+                    </p>
+                </div>
+            {% endif %}
+        <!-- </div>
+    </div> -->
+</div>
+{% endblock %}
