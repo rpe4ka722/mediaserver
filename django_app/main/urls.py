@@ -20,4 +20,5 @@ urlpatterns = [
     path('archive/webhook/record-created/', views.mediamtx_record_webhook, name='mediamtx_webhook'),
     path('archive/download/<int:record_id>/', views.download_record_view, name='download_record'),
     path('archive/delete/<int:record_id>/', views.delete_record_view, name='delete_record'),
+    path('archive/webhook/record_stop/', views.mediamtx_record_stop_webhook, name='mediamtx_record_stop_webhook'),
 ]

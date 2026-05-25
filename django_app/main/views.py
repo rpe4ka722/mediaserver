@@ -739,3 +739,40 @@ def delete_record_view(request, record_id):
     # 4. Перенаправляем пользователя обратно на страницу архива
     # Замените 'archive_list' на имя вашего view со списком записей
     return redirect(request.META.get('HTTP_REFERER', 'archive_list'))
+
+
+@csrf_exempt
+def mediamtx_record_stop_webhook(request):
+    print(f"[DEBUG] Получен запрос на остановку записи от MediaMTX: {request.method} {request.GET}")
+    if request.method != 'POST':
+        return HttpResponse("Method not allowed", status=405)
+        
+    camera_name = request.GET.get('path')
+    if not camera_name:
+        return HttpResponse("Missing data", status=400)
+            
+    try:
+        # 1. Получаем объект камеры из БД
+        camera = Camera.objects.get(name=camera_name)
+    except Camera.DoesNotExist:
+        return HttpResponse("Camera not found", status=404)
+        
+    # 2. Формируем запрос к MediaMTX API
+    url = f"{settings.MEDIAMTX_API_URL.rstrip('/')}/v3/config/paths/patch/{camera_name}"
+    payload = {"record": False}
+    
+    try:
+        response = requests.patch(url, json=payload, timeout=5)
+        
+        if response.status_code in [200, 201, 204]:
+            # 3. Обновляем статус только после успешного ответа сервера
+            camera.is_recording = False
+            camera.save()
+            return HttpResponse("Record stopped and DB updated", status=200)
+        else:
+            logger.error(f"MediaMTX API error {response.status_code}: {response.text}")
+            return HttpResponse("MediaMTX API error", status=502)
+            
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Connection error: {e}")
+        return HttpResponse("MediaMTX unreachable", status=503)

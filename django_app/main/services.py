@@ -13,7 +13,8 @@ def mediamtx_add_path(camera):
         "sourceOnDemandCloseAfter": "10s",  # Закрывать через 10 секунд после последнего клиента
         "record": False,  # Изначально не записывать, запись будет управляться через toggle_record_view 
         # Хук: сегмент записи завершен (запись остановилась или создался новый кусок)
-        "runOnRecordSegmentComplete": "curl -X POST http://django-app:8000/archive/webhook/record-created/?status=stopped&path=$MTX_PATH&file=$MTX_SEGMENT_PATH"
+        "runOnRecordSegmentComplete": "curl -X POST http://django-app:8000/archive/webhook/record-created/?status=stopped&path=$MTX_PATH&file=$MTX_SEGMENT_PATH",
+        "runOnUnread": "curl -X POST http://django-app:8000/archive/webhook/record_stop/?path=$MTX_PATH"
     }
 
     try:
