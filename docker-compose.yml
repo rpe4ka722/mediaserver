@@ -13,7 +13,7 @@ services:
       - 9997
     restart: always
     volumes:
-      - /opt/mediaserver/mediamtx.yml:/mediamtx.yml
+      - ./mediamtx.yml:/mediamtx.yml
       - ${VIDEO_RECORDINGS_PATH}:/recordings
     networks:
       - mediaserver_net
@@ -26,12 +26,12 @@ services:
     expose:
       - 8000
     volumes:
-      - /opt/mediaserver/config:/opt/mediaserver/config
+      - ./config:/opt/mediaserver/config
       - static_volume:/opt/mediaserver/django_app/static
       - ./media:/opt/mediaserver/django_app/media
       - ${VIDEO_RECORDINGS_PATH}:/opt/mediaserver/django_app/recordings
     environment:
-      - ENV_PATH=/opt/mediaserver/config/.env
+      - ENV_PATH=./config/.env
     cap_add:
       - NET_RAW
     networks:

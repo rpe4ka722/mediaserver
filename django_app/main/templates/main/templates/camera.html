@@ -17,7 +17,6 @@
 </div>
 <!-- Содержание тела -->
 <div class="card_wrapper">
-  <!-- Карточки оповещений -->
   {% for camera in cameras %}
   <div id="card_{{camera.id}}"
        class="card_child" 
@@ -32,7 +31,7 @@
        data-password="{{ camera.camera_password|escapejs }}"
        data-port="{{ camera.camera_port|escapejs }}"
        data-path="{{ camera.camera_path|escapejs }}"
-       data-onvif-port="{{ camera.onvif_port|escapejs }}"
+       data-onvif_port="{{ camera.onvif_port|escapejs }}"
 
       onclick="EditFunc(this)">
 
@@ -306,11 +305,10 @@
               type="number" 
               class="form-control" 
               id="edit_onvif_port_input" 
-              name="edit_onvif_port" 
+              name="onvif_port" 
               min="1" 
               max="65535"
-              placeholder="Введите ONVIF порт"
-              value="80" 
+              placeholder="Введите ONVIF порт" 
               required
             >
           </div>

@@ -3,3 +3,4 @@ django-environ
 requests
 gunicorn
 Jinja2
+onvif-zeep

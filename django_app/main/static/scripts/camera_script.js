@@ -8,6 +8,7 @@ function EditFunc(element) {
         login: element.dataset.login,
         password:element.dataset.password,
         port:element.dataset.port,
+        onvif_port:element.dataset.onvif_port,
     }
 
 

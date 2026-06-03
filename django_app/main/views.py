@@ -129,6 +129,7 @@ def edit_camera(request, camera_id):
         camera.camera_password = request.POST.get('camera_password')
         camera.camera_path = request.POST.get('camera_path')
         camera.onvif_port = request.POST.get('onvif_port') or 80
+        print(camera.onvif_port)
 
         new_name = camera.name
         new_path = camera.camera_path
@@ -321,23 +322,23 @@ def check_path_or_create(camera_id):
 
 
 
-@login_required(login_url='account:login')
-def get_camera_bitrate(request, camera_id):
-    """Возвращает битрейт потока камеры (попытками через API MediaMTX).
+# @login_required(login_url='account:login')
+# def get_camera_bitrate(request, camera_id):
+#     """Возвращает битрейт потока камеры (попытками через API MediaMTX).
 
-    Алгоритм:
-    - Запрашивает несколько потенциальных эндпоинтов MediaMTX (/v3/streams/get/<name>, /v3/streams и т.д.).
-    - Парсит JSON-ответ рекурсивно и ищет числовые поля с именами, содержащими 'bit', 'bps' или 'rate'.
-    - Если найдено — возвращает значение в kbps (приближённо) и исходную пару (ключ+значение).
-    - Если не найдено — возвращает отладочную информацию для дальнейшего анализа.
-    """
-    camera = get_object_or_404(Camera, id=camera_id)
-    api_base = settings.MEDIAMTX_API_URL.rstrip('/')
-    endpoints = [
-        f"{api_base}/v3/streams/get/{camera.name}",
-        f"{api_base}/v3/streams",
-        f"{api_base}/v3/streams/list",
-    ]
+#     Алгоритм:
+#     - Запрашивает несколько потенциальных эндпоинтов MediaMTX (/v3/streams/get/<name>, /v3/streams и т.д.).
+#     - Парсит JSON-ответ рекурсивно и ищет числовые поля с именами, содержащими 'bit', 'bps' или 'rate'.
+#     - Если найдено — возвращает значение в kbps (приближённо) и исходную пару (ключ+значение).
+#     - Если не найдено — возвращает отладочную информацию для дальнейшего анализа.
+#     """
+#     camera = get_object_or_404(Camera, id=camera_id)
+#     api_base = settings.MEDIAMTX_API_URL.rstrip('/')
+#     endpoints = [
+#         f"{api_base}/v3/streams/get/{camera.name}",
+#         f"{api_base}/v3/streams",
+#         f"{api_base}/v3/streams/list",
+#     ]
 
 
 # def ping_camera(ip):
