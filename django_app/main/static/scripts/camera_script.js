@@ -8,6 +8,7 @@ function EditFunc(element) {
         login: element.dataset.login,
         password:element.dataset.password,
         port:element.dataset.port,
+        path:element.dataset.path,
         onvif_port:element.dataset.onvif_port,
     }
 
@@ -30,7 +31,7 @@ function EditFunc(element) {
     if (loginInput) loginInput.value = cameraData.login || '';
     if (portInput) portInput.value = cameraData.port || '';
     if (passInput) passInput.value = cameraData.password || '';
-    if (pathInput) pathInput.value = cameraData.path || '/stream1';
+    if (pathInput) pathInput.value = cameraData.path || '';
     if (onvifInput) onvifInput.value = cameraData.onvif_port || 80;
 
     // 4. Если нужно менять URL формы для удаления или сохранения:

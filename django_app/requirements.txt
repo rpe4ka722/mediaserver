@@ -4,3 +4,4 @@ requests
 gunicorn
 Jinja2
 onvif-zeep
+django-redis

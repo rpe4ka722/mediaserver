@@ -5,7 +5,7 @@ from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from django.views.decorators.http import require_POST
 from .models import Camera, CameraRecord
 from .services import mediamtx_add_path, mediamtx_delete_path, mediamtx_edit_path
-from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.csrf import csrf_exempt, csrf_protect
 from datetime import datetime
 from django.core.cache import cache
 from django.contrib import messages
@@ -20,7 +20,9 @@ import socket
 import subprocess
 import logging
 import time
+import json
 from django.utils import timezone
+
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +131,7 @@ def edit_camera(request, camera_id):
         camera.camera_password = request.POST.get('camera_password')
         camera.camera_path = request.POST.get('camera_path')
         camera.onvif_port = request.POST.get('onvif_port') or 80
-        print(camera.onvif_port)
+ 
 
         new_name = camera.name
         new_path = camera.camera_path
@@ -501,7 +503,10 @@ def get_all_cameras_status(request):
         current_time = time.time()
 
         for camera in cameras:
-            # Раз в camera.name хранится слаг ("cam1"), используем его
+
+            # 2. Получаем ONVIF информацию (из кэша, чтобы не тормозить)
+            onvif_info = cache.get(f"cam_onvif_info_{camera.id}")
+
             slug_name = camera.name 
             mtx_cam = mtx_data.get(slug_name)
 
@@ -533,18 +538,24 @@ def get_all_cameras_status(request):
                 
                 # Если поток только пошел, покажем среднее значение, пока копится дельта
                 if bitrate_mbps == 0.00 and current_bytes > 0:
-                    bitrate_mbps = 1.50 
+                    bitrate_mbps = 0.50 
+                
+                
 
                 output_data[str(camera.id)] = {
                     "status": "online",
-                    "bitrate_mbps": bitrate_mbps
+                    "bitrate_mbps": bitrate_mbps,
+                    "onvif_info": onvif_info or "Нет данных ONVIF"
                 }
             else:
                 # Камера оффлайн
                 output_data[str(camera.id)] = {
                     "status": "offline",
-                    "bitrate_mbps": 0.00
+                    "bitrate_mbps": 0.00,
+                    "onvif_info": onvif_info or "Нет данных ONVIF"
                 }
+
+            
 
         # Гарантированно возвращаем чистый Django JsonResponse
         return JsonResponse({'status': 'success', 'data': output_data})
@@ -777,3 +788,50 @@ def mediamtx_record_stop_webhook(request):
     except requests.exceptions.RequestException as e:
         logger.error(f"Connection error: {e}")
         return HttpResponse("MediaMTX unreachable", status=503)
+
+
+@csrf_protect
+def set_camera_resolution(request, camera_id):
+    if request.method != 'POST':
+        return JsonResponse({'status': 'error', 'message': 'Только POST'}, status=405)
+    
+    try:
+        data = json.loads(request.body)
+        res = data.get('resolution') # Ожидаем формат "1920x1080"
+        if not res or 'x' not in res:
+            return JsonResponse({'status': 'error', 'message': 'Неверный формат'}, status=400)
+            
+        width, height = res.split('x')
+        camera = get_object_or_404(Camera, id=camera_id)
+        
+        # Вызываем метод изменения настроек
+        camera.set_resolution(width, height)
+        
+        # Принудительно обновляем кэш после успешной записи
+        from .onvif_service import update_camera_onvif_cache
+        update_camera_onvif_cache(camera)
+        
+        return JsonResponse({'status': 'success'})
+    except Exception as e:
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+
+
+@csrf_protect
+def set_camera_fps(request, camera_id):
+    if request.method != 'POST':
+        return JsonResponse({'status': 'error', 'message': 'Только POST'}, status=405)
+    
+    try:
+        data = json.loads(request.body)
+        camera = get_object_or_404(Camera, id=camera_id)
+
+        if 'fps' in data:
+            camera.set_fps(data['fps'])
+            
+        # Обновляем кэш
+        from .onvif_service import update_camera_onvif_cache
+        update_camera_onvif_cache(camera)
+        
+        return JsonResponse({'status': 'success'})
+    except Exception as e:
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)

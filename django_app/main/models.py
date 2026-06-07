@@ -3,6 +3,11 @@ import logging
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django.core.validators import MaxValueValidator, MinValueValidator
+from onvif import ONVIFCamera
+
+
+
+logger = logging.getLogger(__name__)
 
 class Camera(models.Model):
     name = models.SlugField(unique=True) # Идентификатор для MediaMTX
@@ -47,7 +52,122 @@ class Camera(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.camera_address})"
+
+    
+    def get_onvif_client(self):
+        """Возвращает инициализированный объект ONVIFCamera"""
+        if not self.camera_address:
+            return None
+        return ONVIFCamera(
+            self.camera_address,
+            self.onvif_port,
+            self.camera_login,
+            self.camera_password
+        )
+
+
+    def execute_onvif_call(self, func, *args, **kwargs):
+        """Универсальный обработчик для вызовов ONVIF"""
+        try:
+            client = self.get_onvif_client()
+            if not client:
+                raise Exception("Не удалось инициализировать ONVIF-клиент")
+            
+            # Создаем сервис здесь один раз
+            media_service = client.create_media_service()
+            
+            # Передаем и клиент, и сервис в функцию
+            return func(client, media_service, *args, **kwargs)
+            
+        except Exception as e:
+            logger.error(f"ONVIF Error for {self.name}: {e}")
+            return {"error": str(e)}
+            
+
+    def get_camera_info(self):
+        def _action(client, media_service):
+            dev_service = client.create_devicemgmt_service()
+            device_info = dev_service.GetDeviceInformation()
+            profiles = media_service.GetProfiles()
+            main_profile = profiles[0]
+            
+            encoder_config = media_service.GetVideoEncoderConfiguration(
+                {'ConfigurationToken': main_profile.VideoEncoderConfiguration.token}
+            )
+            return {
+                "manufacturer": device_info.Manufacturer,
+                "model": device_info.Model,
+                "firmware": device_info.FirmwareVersion,
+                "resolution": {"width": encoder_config.Resolution.Width, "height": encoder_config.Resolution.Height},
+                "fps": encoder_config.RateControl.FrameRateLimit
+            }
         
+        return self.execute_onvif_call(_action)
+        
+    def get_supported_options(self):
+        def _action(client, media_service):
+            profiles = media_service.GetProfiles()
+            main_profile = profiles[0]
+            options = media_service.GetVideoEncoderConfigurationOptions({
+                'ProfileToken': main_profile.token,
+                'ConfigurationToken': main_profile.VideoEncoderConfiguration.token
+            })
+            return {
+                "resolutions": [f"{res.Width}x{res.Height}" for res in options.H264.ResolutionsAvailable],
+                "max_fps": options.H264.FrameRateRange.Max,
+                "min_fps": options.H264.FrameRateRange.Min
+            }
+        
+        return self.execute_onvif_call(_action)
+
+    def get_supported_fps_options(self):
+        def _action(client, media_service):
+            profiles = media_service.GetProfiles()
+            main_profile = profiles[0]
+            options = media_service.GetVideoEncoderConfigurationOptions({
+                'ProfileToken': main_profile.token,
+                'ConfigurationToken': main_profile.VideoEncoderConfiguration.token
+            })
+            fps_range = options.H264.FrameRateRange
+            return {
+                "min": fps_range.Min,
+                "max": fps_range.Max,
+                "description": f"От {fps_range.Min} до {fps_range.Max} кадров в секунду"
+            }
+            
+        return self.execute_onvif_call(_action)
+
+    def set_resolution(self, width, height):
+        def _action(client, media_service):
+            profiles = media_service.GetProfiles()
+            token = profiles[0].VideoEncoderConfiguration.token
+            config = media_service.GetVideoEncoderConfiguration({'ConfigurationToken': token})
+            
+            config.Resolution.Width = int(width)
+            config.Resolution.Height = int(height)
+            
+            request = media_service.create_type('SetVideoEncoderConfiguration')
+            request.Configuration = config
+            request.ForcePersistence = True
+            return media_service.SetVideoEncoderConfiguration(request)
+            
+        return self.execute_onvif_call(_action)
+
+    def set_fps(self, fps):
+        def _action(client, media_service):
+            profiles = media_service.GetProfiles()
+            token = profiles[0].VideoEncoderConfiguration.token
+            config = media_service.GetVideoEncoderConfiguration({'ConfigurationToken': token})
+
+            # Обновляем FPS
+            config.RateControl.FrameRateLimit = int(fps)
+
+            request = media_service.create_type('SetVideoEncoderConfiguration')
+            request.Configuration = config
+            request.ForcePersistence = True
+            return media_service.SetVideoEncoderConfiguration(request)
+
+        return self.execute_onvif_call(_action)
 
     class Meta:
         verbose_name = "Камера"

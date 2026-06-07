@@ -58,8 +58,17 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'account',
-    'main',
+    # 'main',
+    'main.apps.DjangoAppConfig',
 ]
+
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": "redis://redis:6379/1",
+        "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"}
+    }
+}
 
 AUTH_USER_MODEL = 'account.CustomUser'
 

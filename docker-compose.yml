@@ -25,11 +25,13 @@ services:
     restart: always
     expose:
       - 8000
+
     volumes:
       - ./config:/opt/mediaserver/config
       - static_volume:/opt/mediaserver/django_app/static
       - ./media:/opt/mediaserver/django_app/media
       - ${VIDEO_RECORDINGS_PATH}:/opt/mediaserver/django_app/recordings
+      - ./django_app/db.sqlite3:/opt/mediaserver/django_app/db.sqlite3
     environment:
       - ENV_PATH=./config/.env
     cap_add:
@@ -54,6 +56,15 @@ services:
       - mediaserver_net
     depends_on:
       - django_app
+    restart: always
+
+  redis:
+    image: redis:alpine
+    container_name: django_redis
+    expose:
+      - 6379
+    networks:
+      - mediaserver_net
     restart: always
 
 volumes:

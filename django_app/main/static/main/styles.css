@@ -399,3 +399,16 @@
     50% { opacity: 0.3; }
     100% { opacity: 1; }
 }
+
+
+.camera-monitor-card {
+
+}.card_child {
+    transition: box-shadow 0.5s,transform 0.5s;
+    margin-bottom: 2rem;
+}
+
+.card_child:hover {
+    transform: translate(-5px, -5px);
+    box-shadow: 2px 2px 4px rgba(10, 10, 10, 0.5);
+}

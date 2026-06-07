@@ -25,12 +25,20 @@ if [ -n "$IMAGE_ID" ]; then
     echo "Удаление старого образа: $IMAGE_ID"
     docker rmi -f "$IMAGE_ID"
 fi
-
-# 4. Выполнение Django команд
-echo "Сбор статики..."
-python3 manage.py collectstatic --noinput --clear
-
 echo "=== Очистка завершена. Начинаем сборку ==="
 
-# 5. Сборка
+echo "Сборка образа..."
 docker build --no-cache -t "$TARGET" .
+
+# 2. Сборка (Compose сам справится с удалением старых слоев при --no-cache)
+
+
+cd ..
+echo "Запуск сервисов..."
+docker compose up -d
+
+
+echo "Сбор статики внутри контейнера..."
+docker compose run --rm "$TARGET" python manage.py collectstatic --noinput
+
+echo "=== Всё готово! ==="

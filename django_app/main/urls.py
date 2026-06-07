@@ -21,4 +21,6 @@ urlpatterns = [
     path('archive/download/<int:record_id>/', views.download_record_view, name='download_record'),
     path('archive/delete/<int:record_id>/', views.delete_record_view, name='delete_record'),
     path('archive/webhook/record_stop/', views.mediamtx_record_stop_webhook, name='mediamtx_record_stop_webhook'),
+    path('api/set_camera_res/<int:camera_id>/', views.set_camera_resolution, name='set_camera_resolution'),
+    path('api/set_camera_fps/<int:camera_id>/', views.set_camera_fps, name='set_camera_fps'),
 ]
