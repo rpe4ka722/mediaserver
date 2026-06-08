@@ -30,7 +30,7 @@
        data-login="{{ camera.camera_login|escapejs }}"
        data-password="{{ camera.camera_password|escapejs }}"
        data-port="{{ camera.camera_port|escapejs }}"
-       data-path="{{ camera.camera_path|escapejs }}"
+       data-path="{{ camera.camera_path|escape }}"
        data-onvif_port="{{ camera.onvif_port|escapejs }}"
 
       onclick="EditFunc(this)">

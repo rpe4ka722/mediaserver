@@ -137,33 +137,21 @@ def edit_camera(request, camera_id):
         new_path = camera.camera_path
 
         try:
+            # 1. Сначала меняем настройки в MediaMTX
+            if old_path != new_path:
+                mediamtx_delete_path(old_name)
+                mediamtx_add_path(camera) # обновленный объект
+            else:
+                mediamtx_edit_path(camera)
+            
+            # 2. Если API ответило ОК, фиксируем в БД
             with transaction.atomic():
-                # 1. Сначала сохраняем изменения в БД
                 camera.save()
-
-                # 2. Проверяем доступность MediaMTX через наш "предохранитель"
-                # Передаем уже сохраненный ID, функция подтянет новые данные
-                status, message = check_path_or_create(camera.id)
-                if not status:
-                    raise Exception(f"MediaMTX недоступен или ошибка пути: {message}")
-
-                # 3. Синхронизация логики путей
-                # Если путь в MediaMTX (camera_path) изменился:
-                if old_path != new_path:
-                    mediamtx_delete_path(old_name)
-                    success, error = mediamtx_add_path(camera)
-                else:
-                    # Если путь тот же, просто обновляем параметры внутри (source и т.д.)
-                    success, error = mediamtx_edit_path(camera)
-
-                if not success:
-                    raise Exception(f"Ошибка API MediaMTX: {error}")
-
-                messages.success(request, f'Камера "{new_name}" обновлена.')
+                messages.success(request, 'Успешно')
 
         except Exception as e:
-            messages.error(request, f'Ошибка сохранения: {e}')
-            logger.error(f"Error updating camera {camera_id}: {str(e)}")
+            # Если API упало, БД осталась нетронутой (старой и верной)
+            messages.error(request, f'Ошибка интеграции: {e}')
 
     return redirect('main:camera')
 

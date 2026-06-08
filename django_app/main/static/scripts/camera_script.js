@@ -1,16 +1,18 @@
 function EditFunc(element) {
     // 1. Извлекаем данные из атрибутов
     const cameraData = {
-        id: element.dataset.id,
-        name: element.dataset.name,
-        description: element.dataset.description,
-        address: element.dataset.address,
-        login: element.dataset.login,
-        password:element.dataset.password,
-        port:element.dataset.port,
-        path:element.dataset.path,
-        onvif_port:element.dataset.onvif_port,
-    }
+        id: element.getAttribute('data-id'),
+        name: element.getAttribute('data-name'),
+        description: element.getAttribute('data-description'),
+        address: element.getAttribute('data-address'),
+        login: element.getAttribute('data-login'),
+        password: element.getAttribute('data-password'),
+        port: element.getAttribute('data-port'),
+        path: element.getAttribute('data-path'), // Вот здесь
+        onvif_port: element.getAttribute('data-onvif_port'),
+    };
+
+    console.log("DEBUG: Path from attribute:", cameraData.path);
 
 
 // 2. Находим поля в модальном окне редактирования
