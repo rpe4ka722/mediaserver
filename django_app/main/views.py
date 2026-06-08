@@ -160,6 +160,12 @@ def edit_camera(request, camera_id):
 def get_camera_stream_url(request, camera_id):
 
         camera = get_object_or_404(Camera, id=camera_id)
+
+        try:
+            update_camera_onvif_cache(camera)
+        except Exception as e:
+            # Логируем, но продолжаем работу, чтобы не ломать видеопоток
+            logger.error(f"Ошибка обновления кэша ONVIF для {camera.name}: {e}")
         
         # Берем IP из настроек
         base_ip = settings.MEDIAMTX_EXTERNAL_IP  # Например, '1.2.3.4' или 'http://1.2.3.4'

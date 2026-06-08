@@ -4,6 +4,7 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django.core.validators import MaxValueValidator, MinValueValidator
 from onvif import ONVIFCamera
+from zeep.transports import Transport
 
 
 
@@ -54,22 +55,33 @@ class Camera(models.Model):
         return f"{self.name} ({self.camera_address})"
 
     
-    def get_onvif_client(self):
-        """Возвращает инициализированный объект ONVIFCamera"""
+    def get_onvif_client(self, timeout=5):
         if not self.camera_address:
             return None
-        return ONVIFCamera(
-            self.camera_address,
-            self.onvif_port,
-            self.camera_login,
-            self.camera_password
-        )
+        
+        # Уменьшаем таймаут до минимума для проверки
+        transport = Transport(timeout=timeout, operation_timeout=timeout)
+
+        try:
+            # no_cache=True заставляет клиента не пытаться 
+            # делать лишние запросы при инициализации
+            client = ONVIFCamera(
+                self.camera_address,
+                self.onvif_port,
+                self.camera_login,
+                self.camera_password,
+                transport=transport
+            )
+            return client
+        except Exception as e:
+            logger.error(f"Ошибка инициализации ONVIF для {self.name}: {e}")
+            return None
 
 
-    def execute_onvif_call(self, func, *args, **kwargs):
+    def execute_onvif_call(self, func, *args, timeout=5, **kwargs):
         """Универсальный обработчик для вызовов ONVIF"""
         try:
-            client = self.get_onvif_client()
+            client = self.get_onvif_client(timeout=timeout)
             if not client:
                 raise Exception("Не удалось инициализировать ONVIF-клиент")
             
