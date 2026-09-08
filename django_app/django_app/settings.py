@@ -46,6 +46,8 @@ ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS").split(" ")
 MEDIAMTX_API_URL = env('MEDIAMTX_API_URL', default='http://127.0.0.1:9997')
 # Внешний IP сервера для генерации ссылок зрителям
 MEDIAMTX_EXTERNAL_IP = env('MEDIAMTX_EXTERNAL_IP')
+# Целевой битрейт серверного видеопотока в килобитах в секунду.
+MEDIAMTX_VIDEO_BITRATE_K = env.int('MEDIAMTX_VIDEO_BITRATE_K', default=2000)
 
 
 # Application definition
@@ -99,7 +101,7 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'django_app.wsgi.application'
+WSGI_APPLICATION = 'django_app.wsgi:application'
 
 
 # Database
