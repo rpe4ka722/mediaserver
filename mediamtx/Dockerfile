@@ -1,16 +1,17 @@
 FROM bluenviron/mediamtx:1 AS mediamtx
 
-# 2. Финальный этап: разворачиваем полноценную Ubuntu 24.04
+# Финальный этап: полноценная Ubuntu 24.04 с MediaMTX и FFmpeg.
 FROM ubuntu:24.04
 
-# 3. Копируем исполняемый файл медиасервера и его стандартный конфиг из первого образа
+# Копируем исполняемый файл MediaMTX и стандартный конфиг из официального образа.
 COPY --from=mediamtx /mediamtx /
 COPY --from=mediamtx /mediamtx.yml /
 
-# 4. Обновляем списки пакетов Ubuntu и устанавливаем curl
+# FFmpeg используется для серверного перекодирования потока и ограничения битрейта.
+# curl нужен для существующих webhook-команд MediaMTX.
 RUN apt update && apt install -y \
     curl \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# 5. Инструкция для запуска медиасервера при старте контейнера
 ENTRYPOINT [ "/mediamtx" ]
