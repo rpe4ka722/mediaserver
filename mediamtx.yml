@@ -26,26 +26,35 @@ hls: yes
 hlsAddress: :8888
 
 
+authMethod: internal
 authInternalUsers:
-- user: any
-  pass:
-  ips: []
+# Учётная запись Django для Control API. Пароль обязательно переопределяется
+# переменной MTX_AUTHINTERNALUSERS_0_PASS из docker-compose.yml.
+- user: django-api
+  pass: disabled-until-overridden
+  ips: ["172.30.0.0/24"]
+  permissions:
+  - action: api
+
+# FFmpeg публикует перекодированный поток только через loopback внутри
+# контейнера MediaMTX.
+- user: internal-publisher
+  pass: disabled-until-overridden
+  ips: ["127.0.0.1", "::1"]
   permissions:
   - action: publish
     path:
+
+# Просмотр разрешён только reverse proxy Nginx из Docker-сети. Порт 8889
+# с хоста не публикуется, а Nginx проверяет активную Django-сессию.
+- user: any
+  pass:
+  ips: ["172.30.0.0/24"]
+  permissions:
   - action: read
     path:
   - action: playback
     path:
-  - action: api
-
-# - user: myuser
-#   pass: mypass
-#   ips: []
-#   permissions:
-#   - action: api
-#   - action: metrics
-#   - action: pprof
 
 ###############################################
 # Настройки путей (камер)
@@ -59,5 +68,5 @@ paths:
     recordFormat: fmp4
 
     # Строго проверенный асинхронный хук (в одну строчку без переносов!)
-    runOnRecordSegmentCreate: sh -c "wget --post-data=\"path=$MTX_PATH&file=$MTX_FILE_PATH\" --timeout=5 -O - http://nginx/archive/webhook/record-created/ || echo 'failed'"
-    runOnRecordSegmentComplete: sh -c "wget --post-data=\"path=$MTX_PATH&file=$MTX_FILE_PATH\" --timeout=5 -O - http://nginx/archive/webhook/record-created/ || echo 'failed'"
+    runOnRecordSegmentCreate: sh -c "curl -fsS -X POST -H \"X-MediaMTX-Webhook-Token: $WEBHOOK_TOKEN\" \"http://django-app:8000/archive/webhook/record-created/?path=$MTX_PATH&file=$MTX_FILE_PATH\" || echo 'failed'"
+    runOnRecordSegmentComplete: sh -c "curl -fsS -X POST -H \"X-MediaMTX-Webhook-Token: $WEBHOOK_TOKEN\" \"http://django-app:8000/archive/webhook/record-created/?path=$MTX_PATH&file=$MTX_FILE_PATH\" || echo 'failed'"

@@ -1,4 +1,13 @@
+import logging
+import secrets
+from functools import wraps
+
+from django.conf import settings
+from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse
+
+logger = logging.getLogger(__name__)
 
 
 def parse_ami_response(s:str):
@@ -12,12 +21,33 @@ def parse_ami_response(s:str):
 
 
 def is_staff(view_func):
+    """Требует авторизацию и роль staff; сохранено имя для совместимости."""
+    @wraps(view_func)
+    @login_required(login_url='account:login')
     def decorator(request, *args, **kwargs):
-        u = request.user
-        if u.is_active and u.is_staff:
-            return view_func(request, *args, **kwargs)
-        else:
-            msg = 'У вас недостаточно прав для данной операции. Обратитесь к администратору либо авторизуйтесь под ' \
-                  'другим именем.'
-            return HttpResponse(msg, status=500)
+        if not request.user.is_active or not request.user.is_staff:
+            raise PermissionDenied
+        return view_func(request, *args, **kwargs)
+
+    return decorator
+
+
+staff_required = is_staff
+
+
+def mediamtx_webhook_required(view_func):
+    """Проверяет общий секрет в webhook-запросах MediaMTX."""
+    @wraps(view_func)
+    def decorator(request, *args, **kwargs):
+        expected = settings.MEDIAMTX_WEBHOOK_TOKEN
+        if not expected:
+            logger.error("MEDIAMTX_WEBHOOK_TOKEN не настроен")
+            return HttpResponse("Webhook authentication is not configured", status=503)
+
+        supplied = request.headers.get('X-MediaMTX-Webhook-Token', '')
+        if not supplied or not secrets.compare_digest(supplied, expected):
+            return HttpResponse("Forbidden", status=403)
+
+        return view_func(request, *args, **kwargs)
+
     return decorator

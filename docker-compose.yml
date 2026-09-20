@@ -4,13 +4,17 @@ services:
     container_name: mediamtx
     environment:
       - MTX_WEBRTCADDITIONALHOSTS=192.168.1.187
+      - MTX_AUTHINTERNALUSERS_0_PASS=${MEDIAMTX_API_PASSWORD:?MEDIAMTX_API_PASSWORD is required}
+      - MTX_AUTHINTERNALUSERS_1_PASS=${MEDIAMTX_PUBLISH_PASSWORD:?MEDIAMTX_PUBLISH_PASSWORD is required}
+      - PUBLISH_PASSWORD=${MEDIAMTX_PUBLISH_PASSWORD:?MEDIAMTX_PUBLISH_PASSWORD is required}
+      - WEBHOOK_TOKEN=${MEDIAMTX_WEBHOOK_TOKEN:?MEDIAMTX_WEBHOOK_TOKEN is required}
     ports:
-      - "8554:8554"
       - "8890:8890/udp"
       - "8189:8189/udp"
-      - "8889:8889"
     expose:
+      - 8554
       - 9997
+      - 8889
     restart: always
     volumes:
       - ./mediamtx.yml:/mediamtx.yml
@@ -34,6 +38,9 @@ services:
       - ./django_app/db.sqlite3:/opt/mediaserver/django_app/db.sqlite3
     environment:
       - ENV_PATH=./config/.env
+      - MEDIAMTX_API_USERNAME=django-api
+      - MEDIAMTX_API_PASSWORD=${MEDIAMTX_API_PASSWORD:?MEDIAMTX_API_PASSWORD is required}
+      - MEDIAMTX_WEBHOOK_TOKEN=${MEDIAMTX_WEBHOOK_TOKEN:?MEDIAMTX_WEBHOOK_TOKEN is required}
     cap_add:
       - NET_RAW
     networks:
@@ -73,3 +80,6 @@ volumes:
 networks:
   mediaserver_net:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

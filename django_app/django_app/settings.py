@@ -44,8 +44,10 @@ ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS").split(" ")
 
 # Ссылка на API (внутренняя)
 MEDIAMTX_API_URL = env('MEDIAMTX_API_URL', default='http://127.0.0.1:9997')
-# Внешний IP сервера для генерации ссылок зрителям
-MEDIAMTX_EXTERNAL_IP = env('MEDIAMTX_EXTERNAL_IP')
+MEDIAMTX_API_USERNAME = env('MEDIAMTX_API_USERNAME', default='django-api')
+MEDIAMTX_API_PASSWORD = env('MEDIAMTX_API_PASSWORD', default='')
+MEDIAMTX_WEBHOOK_TOKEN = env('MEDIAMTX_WEBHOOK_TOKEN', default='')
+MEDIAMTX_PUBLIC_STREAM_BASE = env('MEDIAMTX_PUBLIC_STREAM_BASE', default='')
 # Целевой битрейт серверного видеопотока в килобитах в секунду.
 MEDIAMTX_VIDEO_BITRATE_K = env.int('MEDIAMTX_VIDEO_BITRATE_K', default=2000)
 RECORDINGS_ROOT = Path(env('RECORDINGS_ROOT', default=str(BASE_DIR / 'recordings'))).resolve()

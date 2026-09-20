@@ -4,6 +4,7 @@ from . import views
 app_name = 'main'
 
 urlpatterns = [
+    path('internal/stream-auth/', views.stream_proxy_auth, name='stream_proxy_auth'),
     path('', views.index, name='index'),
     path('camera', views.camera, name='camera'),
     path('create_camera', views.create_camera, name='create_camera'),

@@ -5,11 +5,12 @@ from .scripts import form_errors_text
 from django.shortcuts import get_object_or_404, HttpResponse
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
-from main.scripts import is_staff
+from django.views.decorators.http import require_POST
+from main.scripts import staff_required
 
 
 # Create your views here.
-@login_required(login_url='account:login')
+@staff_required
 def account_index(request, msg=''):
     adm = False
     users = CustomUser.objects.all()
@@ -17,8 +18,8 @@ def account_index(request, msg=''):
     return render(request, 'account/templates/account.html', context)
 
 
-@is_staff
-@login_required(login_url='account:login')
+@staff_required
+@require_POST
 def create_user(request):
     msg=''
     if request.method == 'POST':
@@ -38,8 +39,8 @@ def create_user(request):
     return HttpResponse(msg, status=200)
 
 
-@is_staff
-@login_required(login_url='account:login')
+@staff_required
+@require_POST
 def delete_user(request, id):
     try:
         user = get_object_or_404(CustomUser, pk=id)
@@ -49,8 +50,8 @@ def delete_user(request, id):
     return redirect('account:index')
 
 
-@is_staff
-@login_required(login_url='account:login')
+@staff_required
+@require_POST
 def edit_user(request, id):
     try:
         user = get_object_or_404(CustomUser, pk=id)
