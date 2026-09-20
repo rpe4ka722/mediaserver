@@ -5,14 +5,17 @@ from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from django.views.decorators.http import require_POST
 from .models import Camera, CameraRecord
 from .services import mediamtx_add_path, mediamtx_delete_path, mediamtx_edit_path
+from .onvif_service import update_camera_onvif_cache, refresh_camera_onvif_cache_async
 from django.views.decorators.csrf import csrf_exempt, csrf_protect
 from datetime import datetime
 from django.core.cache import cache
 from django.contrib import messages
 from django.conf import settings
 from urllib.parse import quote
-from django.http import JsonResponse, HttpResponse, FileResponse
+from django.http import JsonResponse, HttpResponse, Http404, FileResponse
 from django.db import transaction
+from pathlib import Path
+import copy
 import os
 import re
 import platform
@@ -55,35 +58,44 @@ def create_camera(request):
         onvif_port = request.POST.get('onvif_port') or 80
 
 
-        try:
-            # Используем блок транзакции
-            with transaction.atomic():
-                # Создаем объект в памяти (без сохранения в БД пока что, если нужно)
-                # Или создаем в БД, но в рамках транзакции
-                camera = Camera.objects.create(
-                    name=name,
-                    description=description,
-                    camera_address=address,
-                    camera_port=port,
-                    camera_login=login,
-                    camera_password=password,
-                    camera_path=path,
-                    onvif_port=onvif_port 
-                )
+        camera = Camera(
+            name=name,
+            description=description,
+            camera_address=address,
+            camera_port=port,
+            camera_login=login,
+            camera_password=password,
+            camera_path=path,
+            onvif_port=onvif_port,
+        )
 
-                # 2. Попытка добавить в MediaMTX
-                success, error_msg = mediamtx_add_path(camera)
-                
-                if success:
-                    messages.success(request, f'Камера "{name}" успешно добавлена.')
-                else:
-                    # ВАЖНО: Выбрасываем исключение, чтобы откатить транзакцию в БД
-                    raise Exception(f"MediaMTX Error: {error_msg}")
+        path_created = False
+        try:
+            camera.full_clean()
+            success, error_msg = mediamtx_add_path(camera)
+            if not success:
+                raise RuntimeError(f"MediaMTX Error: {error_msg}")
+            path_created = True
+
+            try:
+                with transaction.atomic():
+                    camera.save()
+            except Exception:
+                # Не оставляем путь-сироту, если сохранение в БД не состоялось.
+                cleanup_ok, cleanup_error = mediamtx_delete_path(camera.name)
+                if not cleanup_ok:
+                    logger.error("Не удалось удалить путь-сироту MediaMTX %s: %s", camera.name, cleanup_error)
+                path_created = False
+                raise
+
+            messages.success(request, f'Камера "{name}" успешно добавлена.')
 
         except Exception as e:
-            # Сюда попадем и при ошибке БД, и при нашей ошибке MediaMTX
+            if path_created and not camera.pk:
+                cleanup_ok, cleanup_error = mediamtx_delete_path(camera.name)
+                if not cleanup_ok:
+                    logger.error("Не удалось удалить путь-сироту MediaMTX %s: %s", camera.name, cleanup_error)
             messages.error(request, f'Камера не добавлена: {e}')
-            # Если возникло исключение внутри atomic(), запись в БД не будет создана
         
         return redirect('main:camera')
     
@@ -97,16 +109,21 @@ def delete_camera(request, camera_id):
         name = camera.name
         
         try:
-            with transaction.atomic():
-                # 1. Сначала удаляем из MediaMTX
-                success, error_msg = mediamtx_delete_path(name)
-                
-                if success:
-                    # 2. Если сервис удалил, удаляем из БД
+            success, error_msg = mediamtx_delete_path(name)
+            if not success:
+                raise RuntimeError(f"MediaMTX не позволил удалить поток: {error_msg}")
+
+            try:
+                with transaction.atomic():
                     camera.delete()
-                    messages.success(request, f'Камера "{name}" удалена.')
-                else:
-                    raise Exception(f"MediaMTX не позволил удалить поток: {error_msg}")
+            except Exception:
+                # Компенсируем удаление внешней конфигурации при ошибке БД.
+                restored, restore_error = mediamtx_add_path(camera)
+                if not restored:
+                    logger.critical("Не удалось восстановить путь MediaMTX %s: %s", name, restore_error)
+                raise
+
+            messages.success(request, f'Камера "{name}" удалена.')
         except Exception as e:
             messages.error(request, str(e))
             
@@ -118,9 +135,10 @@ def edit_camera(request, camera_id):
     if request.method == 'POST':
         camera = get_object_or_404(Camera, pk=camera_id)
         
-        # Сохраняем старые значения для сравнения и удаления
+        # Снимок нужен для компенсации, если БД не сохранится после изменения
+        # внешней конфигурации MediaMTX.
+        old_camera = copy.copy(camera)
         old_name = camera.name
-        old_path = camera.camera_path  # Именно по этому полю ищем в MediaMTX
 
         # Обновляем объект данными из формы (пока без save)
         camera.name = request.POST.get('camera_name')
@@ -134,19 +152,44 @@ def edit_camera(request, camera_id):
  
 
         new_name = camera.name
-        new_path = camera.camera_path
 
         try:
-            # 1. Сначала меняем настройки в MediaMTX
-            if old_path != new_path:
-                mediamtx_delete_path(old_name)
-                mediamtx_add_path(camera) # обновленный объект
+            camera.full_clean()
+
+            if old_name != new_name:
+                # При переименовании сначала создаём новый рабочий путь. Старый
+                # удаляем только после успешного commit в Django.
+                success, error_msg = mediamtx_add_path(camera)
             else:
-                mediamtx_edit_path(camera)
-            
-            # 2. Если API ответило ОК, фиксируем в БД
-            with transaction.atomic():
-                camera.save()
+                success, error_msg = mediamtx_edit_path(camera)
+
+            if not success:
+                raise RuntimeError(f"MediaMTX Error: {error_msg}")
+
+            try:
+                with transaction.atomic():
+                    camera.save()
+            except Exception:
+                if old_name != new_name:
+                    restored, restore_error = mediamtx_delete_path(new_name)
+                else:
+                    restored, restore_error = mediamtx_edit_path(old_camera)
+                if not restored:
+                    logger.critical(
+                        "Не удалось компенсировать изменение MediaMTX для камеры %s: %s",
+                        old_name,
+                        restore_error,
+                    )
+                raise
+
+            if old_name != new_name:
+                deleted, delete_error = mediamtx_delete_path(old_name)
+                if not deleted:
+                    logger.error("Не удалось удалить старый путь MediaMTX %s: %s", old_name, delete_error)
+                    messages.warning(request, f'Камера сохранена, но старый поток "{old_name}" требует очистки.')
+                else:
+                    messages.success(request, 'Успешно')
+            else:
                 messages.success(request, 'Успешно')
 
         except Exception as e:
@@ -161,11 +204,9 @@ def get_camera_stream_url(request, camera_id):
 
         camera = get_object_or_404(Camera, id=camera_id)
 
-        try:
-            update_camera_onvif_cache(camera)
-        except Exception as e:
-            # Логируем, но продолжаем работу, чтобы не ломать видеопоток
-            logger.error(f"Ошибка обновления кэша ONVIF для {camera.name}: {e}")
+        # ONVIF может отвечать несколько секунд, поэтому не задерживаем выдачу
+        # ссылки на видеопоток.
+        refresh_camera_onvif_cache_async(camera.id)
         
         # Берем IP из настроек
         base_ip = settings.MEDIAMTX_EXTERNAL_IP  # Например, '1.2.3.4' или 'http://1.2.3.4'
@@ -412,14 +453,12 @@ def config_main(request):
 
 @login_required(login_url='account:login')
 def get_camera_bitrate(request, camera_id):
-    """
-    Возвращает РЕАЛЬНУЮ текущую сетевую нагрузку (битрейт) потока из MediaMTX.
-    """
+    """Возвращает битрейт, рассчитанный по дельте счётчика MediaMTX."""
     camera = get_object_or_404(Camera, id=camera_id)
     api_base = settings.MEDIAMTX_API_URL.rstrip('/')
-    
-    # В MediaMTX поток идентифицируется по camera_path (имени пути)
-    path_name = camera.camera_path
+
+    # Динамические пути создаются под уникальным именем Camera.name.
+    path_name = camera.name
     url = f"{api_base}/v3/paths/get/{path_name}"
 
     try:
@@ -438,30 +477,20 @@ def get_camera_bitrate(request, camera_id):
 
         data = r.json()
         
-        # --- Парсинг структуры MediaMTX v3 ---
-        # Текущая скорость входящего потока от камеры в MediaMTX лежит в bytesReceived
-        # Она находится внутри объекта "sourceState" или корневого объекта пути, если поток активен.
-        bytes_received_per_sec = 0
-        
-        if 'sourceState' in data and data['sourceState']:
-            # MediaMTX v3 часто пишет метрики внутрь состояния источника
-            bytes_received_per_sec = data['sourceState'].get('bytesReceived', 0)
-        else:
-            # Альтернативное расположение в некоторых сборках MediaMTX
-            bytes_received_per_sec = data.get('bytesReceived', 0)
-
-        # Конвертируем Bytes/sec в биты и килобиты
-        # 1 Byte = 8 bits
-        bits_per_sec = bytes_received_per_sec * 8
-        kbps = bits_per_sec / 1000.0
-        mbps = kbps / 1000.0
+        current_bytes = _extract_bytes_received(data)
+        bitrate_mbps = _calculate_bitrate_mbps(
+            camera.id,
+            current_bytes,
+            cache_namespace='detail',
+        )
 
         return JsonResponse({
             'status': 'success',
             'path': path_name,
-            'bytes_per_sec': bytes_received_per_sec, # для отладки
-            'bitrate_kbps': round(kbps, 2),          # например: 3450.21 Kbps
-            'bitrate_mbps': round(mbps, 2),          # например: 3.45 Mbps
+            'bytes_received': current_bytes,
+            'bitrate_kbps': round((bitrate_mbps or 0) * 1000, 2),
+            'bitrate_mbps': bitrate_mbps or 0.0,
+            'warming_up': bitrate_mbps is None,
         })
 
     except requests.exceptions.RequestException as e:
@@ -472,7 +501,36 @@ def get_camera_bitrate(request, camera_id):
         return JsonResponse({'status': 'error', 'message': f'Внутренняя ошибка: {str(e)}'}, status=500)
 
 
+def _extract_bytes_received(path_data):
+    """Извлекает накопительный счётчик принятых байтов из ответа MediaMTX."""
+    source_state = path_data.get('sourceState') or {}
+    value = source_state.get('bytesReceived', path_data.get('bytesReceived', 0))
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
 
+
+def _calculate_bitrate_mbps(camera_id, current_bytes, cache_namespace='list'):
+    """Считает скорость по двум замерам накопительного счётчика."""
+    now = time.monotonic()
+    cache_key = f"cam_metrics_{cache_namespace}_{camera_id}"
+    previous = cache.get(cache_key)
+    cache.set(cache_key, {'bytes': current_bytes, 'time': now}, timeout=30)
+
+    if not previous:
+        return None
+
+    bytes_delta = current_bytes - previous.get('bytes', current_bytes)
+    time_delta = now - previous.get('time', now)
+    if time_delta <= 0 or bytes_delta < 0:
+        return None
+
+    return round((bytes_delta * 8) / 1_000_000 / time_delta, 2)
+
+
+
+@login_required(login_url='account:login')
 def get_all_cameras_status(request):
     try:
         # 1. Запрашиваем живые потоки у MediaMTX
@@ -494,45 +552,21 @@ def get_all_cameras_status(request):
         # 2. Берем все камеры из нашей БД Django
         cameras = Camera.objects.all()
         output_data = {}
-        current_time = time.time()
-
         for camera in cameras:
 
             # 2. Получаем ONVIF информацию (из кэша, чтобы не тормозить)
             onvif_info = cache.get(f"cam_onvif_info_{camera.id}")
+            if onvif_info is None:
+                refresh_camera_onvif_cache_async(camera.id)
 
             slug_name = camera.name 
             mtx_cam = mtx_data.get(slug_name)
 
             if mtx_cam and mtx_cam.get('ready', False):
                 # Камера активна. Считаем битрейт
-                current_bytes = mtx_cam.get('bytesReceived', 0)
-                
-                # Ключ для хранения предыдущих замеров в кеше
-                cache_key = f"cam_metrics_{camera.id}"
-                previous_data = cache.get(cache_key)
-                
-                bitrate_mbps = 0.00
-                
-                if previous_data:
-                    prev_bytes = previous_data.get('bytes', 0)
-                    prev_time = previous_data.get('time', 0)
-                    
-                    # Вычисляем дельту байт и времени
-                    bytes_delta = current_bytes - prev_bytes
-                    time_delta = current_time - prev_time
-                    
-                    if time_delta > 0 and bytes_delta >= 0:
-                        # Байты в биты -> в Мегабиты -> делим на секунды
-                        bitrate_bps = bytes_delta * 8
-                        bitrate_mbps = round(bitrate_bps / (1024 * 1024) / time_delta, 2)
-                
-                # Обновляем данные в кеше для следующего шага (на 10 секунд)
-                cache.set(cache_key, {'bytes': current_bytes, 'time': current_time}, 10)
-                
-                # Если поток только пошел, покажем среднее значение, пока копится дельта
-                if bitrate_mbps == 0.00 and current_bytes > 0:
-                    bitrate_mbps = 0.50 
+                current_bytes = _extract_bytes_received(mtx_cam)
+                measured_bitrate = _calculate_bitrate_mbps(camera.id, current_bytes)
+                bitrate_mbps = measured_bitrate or 0.0
                 
                 
 
@@ -699,19 +733,33 @@ def download_record_view(request, record_id):
     record = get_object_or_404(CameraRecord, id=record_id)
     
     # 2. Берем путь к файлу, сохраненный в базе данных
-    file_path = record.file_path
+    file_path = Path(record.file_path).resolve()
+    recordings_root = Path(settings.RECORDINGS_ROOT).resolve()
+
+    try:
+        relative_path = file_path.relative_to(recordings_root)
+    except ValueError:
+        logger.error("Запись %s указывает за пределы RECORDINGS_ROOT: %s", record.id, file_path)
+        raise Http404("Некорректный путь к видеозаписи.")
     
     # 3. Проверяем, существует ли файл физически на диске контейнера Django
-    if not os.path.exists(file_path):
+    if not file_path.is_file():
         raise Http404("Файл видеозаписи физически не найден на сервере.")
-        
-    # 4. Открываем файл в бинарном режиме чтения
-    # Использование FileResponse позволяет эффективно отдавать большие файлы (видео) частями
-    response = FileResponse(open(file_path, 'rb'), content_type='video/mp4')
-    
-    # 5. Принудительно заставляем браузер скачивать файл, а не воспроизводить его на месте
-    # Имя файла берем из базы данных
-    response['Content-Disposition'] = f'attachment; filename="{record.file_name}"'
+
+    if not settings.USE_X_ACCEL_REDIRECT:
+        return FileResponse(
+            file_path.open('rb'),
+            as_attachment=True,
+            filename=record.file_name,
+            content_type='video/mp4',
+        )
+
+    # Файл отдаёт Nginx через internal location, не занимая Gunicorn worker.
+    internal_path = quote(relative_path.as_posix(), safe='/')
+    response = HttpResponse(content_type='video/mp4')
+    response['X-Accel-Redirect'] = f'/protected_recordings/{internal_path}'
+    encoded_name = quote(record.file_name, safe='')
+    response['Content-Disposition'] = f"attachment; filename*=UTF-8''{encoded_name}"
     
     return response
 
@@ -784,6 +832,7 @@ def mediamtx_record_stop_webhook(request):
         return HttpResponse("MediaMTX unreachable", status=503)
 
 
+@login_required(login_url='account:login')
 @csrf_protect
 def set_camera_resolution(request, camera_id):
     if request.method != 'POST':
@@ -795,21 +844,26 @@ def set_camera_resolution(request, camera_id):
         if not res or 'x' not in res:
             return JsonResponse({'status': 'error', 'message': 'Неверный формат'}, status=400)
             
-        width, height = res.split('x')
+        width, height = (int(value) for value in res.split('x', 1))
+        if width <= 0 or height <= 0:
+            return JsonResponse({'status': 'error', 'message': 'Разрешение должно быть положительным'}, status=400)
         camera = get_object_or_404(Camera, id=camera_id)
         
-        # Вызываем метод изменения настроек
-        camera.set_resolution(width, height)
+        result = camera.set_resolution(width, height)
+        if isinstance(result, dict) and result.get('error'):
+            return JsonResponse({'status': 'error', 'message': result['error']}, status=502)
         
-        # Принудительно обновляем кэш после успешной записи
-        from .onvif_service import update_camera_onvif_cache
-        update_camera_onvif_cache(camera)
+        onvif_info = update_camera_onvif_cache(camera)
         
-        return JsonResponse({'status': 'success'})
+        return JsonResponse({'status': 'success', 'onvif_info': onvif_info})
+    except (TypeError, ValueError):
+        return JsonResponse({'status': 'error', 'message': 'Неверный формат разрешения'}, status=400)
     except Exception as e:
+        logger.exception("Ошибка изменения разрешения камеры %s", camera_id)
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
 
 
+@login_required(login_url='account:login')
 @csrf_protect
 def set_camera_fps(request, camera_id):
     if request.method != 'POST':
@@ -819,13 +873,22 @@ def set_camera_fps(request, camera_id):
         data = json.loads(request.body)
         camera = get_object_or_404(Camera, id=camera_id)
 
-        if 'fps' in data:
-            camera.set_fps(data['fps'])
+        if 'fps' not in data:
+            return JsonResponse({'status': 'error', 'message': 'FPS не указан'}, status=400)
+
+        fps = int(data['fps'])
+        if fps <= 0:
+            return JsonResponse({'status': 'error', 'message': 'FPS должен быть положительным'}, status=400)
+
+        result = camera.set_fps(fps)
+        if isinstance(result, dict) and result.get('error'):
+            return JsonResponse({'status': 'error', 'message': result['error']}, status=502)
             
-        # Обновляем кэш
-        from .onvif_service import update_camera_onvif_cache
-        update_camera_onvif_cache(camera)
+        onvif_info = update_camera_onvif_cache(camera)
         
-        return JsonResponse({'status': 'success'})
+        return JsonResponse({'status': 'success', 'onvif_info': onvif_info})
+    except (TypeError, ValueError):
+        return JsonResponse({'status': 'error', 'message': 'Неверный формат FPS'}, status=400)
     except Exception as e:
+        logger.exception("Ошибка изменения FPS камеры %s", camera_id)
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)

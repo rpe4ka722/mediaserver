@@ -1,4 +1,5 @@
 import shlex
+from urllib.parse import quote
 
 import requests
 from django.conf import settings
@@ -35,7 +36,8 @@ def _mediamtx_path_payload(camera):
 def mediamtx_add_path(camera):
     """Добавляет поток в MediaMTX с серверным перекодированием через FFmpeg."""
     mtx_api_base = settings.MEDIAMTX_API_URL.rstrip('/')
-    url = f"{mtx_api_base}/v3/config/paths/add/{camera.name}"
+    path_name = quote(camera.name, safe='')
+    url = f"{mtx_api_base}/v3/config/paths/add/{path_name}"
 
     try:
         response = requests.post(url, json=_mediamtx_path_payload(camera), timeout=3)
@@ -47,7 +49,8 @@ def mediamtx_add_path(camera):
 def mediamtx_delete_path(camera_name):
     """Удаляет поток из конфигурации MediaMTX."""
     mtx_api_base = settings.MEDIAMTX_API_URL.rstrip('/')
-    url = f"{mtx_api_base}/v3/config/paths/delete/{camera_name}"
+    path_name = quote(camera_name, safe='')
+    url = f"{mtx_api_base}/v3/config/paths/delete/{path_name}"
 
     try:
         response = requests.delete(url, timeout=3)
@@ -59,9 +62,12 @@ def mediamtx_delete_path(camera_name):
 
 def mediamtx_edit_path(camera):
     """Обновляет существующий путь и параметры серверного перекодирования."""
-    url = f"{settings.MEDIAMTX_API_URL.rstrip('/')}/v3/config/paths/patch/{camera.name}"
+    path_name = quote(camera.name, safe='')
+    url = f"{settings.MEDIAMTX_API_URL.rstrip('/')}/v3/config/paths/patch/{path_name}"
     try:
         response = requests.patch(url, json=_mediamtx_path_payload(camera), timeout=3)
+        if response.status_code == 404:
+            return mediamtx_add_path(camera)
         return response.status_code in [200, 204], response.text
     except requests.exceptions.RequestException as e:
         return False, str(e)

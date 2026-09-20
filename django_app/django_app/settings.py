@@ -48,6 +48,8 @@ MEDIAMTX_API_URL = env('MEDIAMTX_API_URL', default='http://127.0.0.1:9997')
 MEDIAMTX_EXTERNAL_IP = env('MEDIAMTX_EXTERNAL_IP')
 # Целевой битрейт серверного видеопотока в килобитах в секунду.
 MEDIAMTX_VIDEO_BITRATE_K = env.int('MEDIAMTX_VIDEO_BITRATE_K', default=2000)
+RECORDINGS_ROOT = Path(env('RECORDINGS_ROOT', default=str(BASE_DIR / 'recordings'))).resolve()
+USE_X_ACCEL_REDIRECT = env.bool('USE_X_ACCEL_REDIRECT', default=True)
 
 
 # Application definition
