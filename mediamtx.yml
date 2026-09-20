@@ -60,13 +60,19 @@ authInternalUsers:
 # Настройки путей (камер)
 ###############################################
 
-paths:
-  all:
-    sourceProtocol: tcp
-    record: no  
-    recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S
-    recordFormat: fmp4
+pathDefaults:
+  record: no
+  recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f
+  recordFormat: fmp4
+  runOnUnread: ""
+  runOnRecordSegmentCreate: >-
+    curl -fsS --max-time 10 -X POST
+    -H "X-MediaMTX-Webhook-Token: $WEBHOOK_TOKEN"
+    "http://django-app:8000/archive/webhook/record-created/?path=$MTX_PATH&file=$MTX_SEGMENT_PATH"
+  runOnRecordSegmentComplete: >-
+    curl -fsS --max-time 10 -X POST
+    -H "X-MediaMTX-Webhook-Token: $WEBHOOK_TOKEN"
+    "http://django-app:8000/archive/webhook/record-created/?path=$MTX_PATH&file=$MTX_SEGMENT_PATH"
 
-    # Строго проверенный асинхронный хук (в одну строчку без переносов!)
-    runOnRecordSegmentCreate: sh -c "curl -fsS -X POST -H \"X-MediaMTX-Webhook-Token: $WEBHOOK_TOKEN\" \"http://django-app:8000/archive/webhook/record-created/?path=$MTX_PATH&file=$MTX_FILE_PATH\" || echo 'failed'"
-    runOnRecordSegmentComplete: sh -c "curl -fsS -X POST -H \"X-MediaMTX-Webhook-Token: $WEBHOOK_TOKEN\" \"http://django-app:8000/archive/webhook/record-created/?path=$MTX_PATH&file=$MTX_FILE_PATH\" || echo 'failed'"
+# Cameras are registered explicitly through the Control API.
+paths: {}

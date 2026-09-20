@@ -41,9 +41,10 @@ def _mediamtx_path_payload(camera):
         "runOnDemandRestart": True,
         "runOnDemandStartTimeout": "15s",
         "runOnDemandCloseAfter": "10s",
-        "record": False,
+        "record": camera.is_recording,
         "runOnRecordSegmentComplete": "curl -fsS -X POST -H \"X-MediaMTX-Webhook-Token: $WEBHOOK_TOKEN\" \"http://django-app:8000/archive/webhook/record-created/?status=stopped&path=$MTX_PATH&file=$MTX_SEGMENT_PATH\"",
-        "runOnUnread": "curl -fsS -X POST -H \"X-MediaMTX-Webhook-Token: $WEBHOOK_TOKEN\" \"http://django-app:8000/archive/webhook/record_stop/?path=$MTX_PATH\"",
+        # Explicitly clear the legacy hook when patching an existing path.
+        "runOnUnread": "",
     }
 
 

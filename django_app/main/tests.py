@@ -1,4 +1,7 @@
 import json
+import os
+import subprocess
+import sys
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -29,6 +32,18 @@ TEST_CACHES = {
         'LOCATION': 'mediaserver-tests',
     }
 }
+
+
+class DebugConfigurationTests(SimpleTestCase):
+    def test_debug_false_is_boolean_in_actual_settings_module(self):
+        result = subprocess.run(
+            [sys.executable, '-c',
+             'from django_app.settings import DEBUG; assert DEBUG is False, repr(DEBUG)'],
+            env={**os.environ, 'DEBUG': 'False', 'SECRET_KEY': 'test-only',
+                 'ALLOWED_HOSTS': 'testserver'},
+            capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 @override_settings(CACHES=TEST_CACHES)
@@ -95,6 +110,7 @@ class MediaMTXServiceContractTests(SimpleTestCase):
     def setUp(self):
         self.camera = SimpleNamespace(
             name='cam one/entrance',
+            is_recording=False,
             rtsp_url='rtsp://camera-user:camera-pass@192.0.2.10:554/stream1',
         )
 
@@ -106,7 +122,18 @@ class MediaMTXServiceContractTests(SimpleTestCase):
         self.assertIn('-maxrate 1500k', payload['runOnDemand'])
         self.assertIn('internal-publisher:$PUBLISH_PASSWORD@127.0.0.1', payload['runOnDemand'])
         self.assertIn('X-MediaMTX-Webhook-Token: $WEBHOOK_TOKEN', payload['runOnRecordSegmentComplete'])
-        self.assertIn('X-MediaMTX-Webhook-Token: $WEBHOOK_TOKEN', payload['runOnUnread'])
+        self.assertEqual(payload['runOnUnread'], '')
+
+    @patch('main.services.mediamtx_request')
+    def test_edit_preserves_recording_and_removes_legacy_disconnect_hook(self, request):
+        request.return_value = Mock(status_code=200, text='ok')
+        for recording in (True, False):
+            with self.subTest(recording=recording):
+                self.camera.is_recording = recording
+                self.assertTrue(mediamtx_edit_path(self.camera)[0])
+                payload = request.call_args.kwargs['json']
+                self.assertIs(payload['record'], recording)
+                self.assertEqual(payload['runOnUnread'], '')
 
     @patch('main.services.mediamtx_request')
     def test_add_path_url_encodes_camera_name(self, request):
